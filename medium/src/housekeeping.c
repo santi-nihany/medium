@@ -16,25 +16,24 @@ static uint32_t min_free_heap = UINT32_MAX;
 void vHousekeeping_Task(void *pvParameters)
 {
     TickType_t last_wake_time = xTaskGetTickCount();
-    
+
     printf("Housekeeping Task started.\r\n");
-    
+
     for (;;) {
-        // printf("hello from housekeep");
-        // vTaskDelay(pdMS_TO_TICKS(10000));
-        // /* Monitor free heap */
-        // uint32_t free_heap = xPortGetFreeHeapSize();
-        // if (free_heap < min_free_heap) {
-        //     min_free_heap = free_heap;
-        // }
-        
-        // /* TODO: Feed watchdog */
-        // Housekeeping_FeedWatchdog();
-        
-        // /* TODO: Check for stack overflows */
-        
-        // /* Maintain periodic delay */
-        // vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(HOUSEKEEPING_PERIOD_MS));
+        /* Monitor free heap */
+        uint32_t free_heap = xPortGetFreeHeapSize();
+        if (free_heap < min_free_heap) {
+            min_free_heap = free_heap;
+        }
+
+        printf("[Housekeeping] Free heap: %lu bytes, Min: %lu bytes\r\n",
+               (unsigned long)free_heap, (unsigned long)min_free_heap);
+
+        /* TODO: Feed watchdog */
+        /* Housekeeping_FeedWatchdog(); */
+
+        /* Maintain periodic delay (3 seconds) */
+        vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(3000));
     }
 }
 

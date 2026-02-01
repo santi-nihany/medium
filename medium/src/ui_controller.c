@@ -157,12 +157,15 @@ void vUI_Task(void *pvParameters)
 {
     UICommand_t command;
     TickType_t last_wake_time = xTaskGetTickCount();
-    
+
+    (void)command;       /* Suppress unused warning for now */
+    (void)last_wake_time;
+
     printf("UI Task started.\r\n");
-    
+
     for (;;) {
-        printf("hello from ui controller");
-        vTaskDelay(pdMS_TO_TICKS(10000));
+        printf("hello from ui controller\r\n");
+        vTaskDelay(pdMS_TO_TICKS(5000));
         // /* Check for incoming commands */
         // if (xQueueReceive(xUICommandQueue, &command, 0) == pdPASS) {
         //     ProcessUICommand(command);

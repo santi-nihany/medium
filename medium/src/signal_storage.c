@@ -110,10 +110,9 @@ void vStorage_Task(void *pvParameters)
     UINT total_bytes = 0;
     
     printf("[Storage] Storage Task started\r\n");
-    
-    // Create storage semaphore
-    xStorageInUse = xSemaphoreCreateMutex();
-    
+
+    /* Note: xStorageMutex is created in main.c, no need to create another */
+
     // Mount SD card
     if (MountSD() != pdPASS) {
         printf("[Storage] ERROR: Cannot mount SD card, task will retry\r\n");

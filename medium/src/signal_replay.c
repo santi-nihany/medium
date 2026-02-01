@@ -19,46 +19,42 @@ static char replay_filename[64] = {0};
 void vReplay_Task(void *pvParameters)
 {
     printf("Replay Task started.\r\n");
-    
+
     for (;;) {
-        // printf("hello from signal replay");
-        // vTaskDelay(pdMS_TO_TICKS(10000));
-        // switch (xReplayState) {
-        //     case REPLAY_STATE_IDLE:
-        //         /* Wait for replay command */
-        //         vTaskDelay(pdMS_TO_TICKS(100));
-        //         break;
-                
-        //     case REPLAY_STATE_LOADING:
-        //         /* TODO: Load signal from SD card */
-        //         printf("Loading signal: %s\r\n", replay_filename);
-        //         xReplayState = REPLAY_STATE_READY;
-        //         break;
-                
-        //     case REPLAY_STATE_READY:
-        //         /* Wait for play command */
-        //         vTaskDelay(pdMS_TO_TICKS(50));
-        //         break;
-                
-        //     case REPLAY_STATE_PLAYING:
-        //         /* TODO: Reproduce signal with precise timing */
-        //         printf("Replaying...\r\n");
-        //         vTaskDelay(pdMS_TO_TICKS(100));
-                
-        //         /* Update progress */
-        //         xReplayProgress++;
-        //         if (xReplayProgress >= 100) {
-        //             xReplayProgress = 0;
-        //             xReplayState = REPLAY_STATE_IDLE;
-        //         }
-        //         break;
-                
-        //     case REPLAY_STATE_ERROR:
-        //         /* Error handling */
-        //         vTaskDelay(pdMS_TO_TICKS(1000));
-        //         xReplayState = REPLAY_STATE_IDLE;
-        //         break;
-        // }
+        printf("hello from signal replay\r\n");
+        vTaskDelay(pdMS_TO_TICKS(4000));
+
+        /* TODO: Enable state machine when ready for replay testing
+        switch (xReplayState) {
+            case REPLAY_STATE_IDLE:
+                vTaskDelay(pdMS_TO_TICKS(100));
+                break;
+
+            case REPLAY_STATE_LOADING:
+                printf("Loading signal: %s\r\n", replay_filename);
+                xReplayState = REPLAY_STATE_READY;
+                break;
+
+            case REPLAY_STATE_READY:
+                vTaskDelay(pdMS_TO_TICKS(50));
+                break;
+
+            case REPLAY_STATE_PLAYING:
+                printf("Replaying...\r\n");
+                vTaskDelay(pdMS_TO_TICKS(100));
+                xReplayProgress++;
+                if (xReplayProgress >= 100) {
+                    xReplayProgress = 0;
+                    xReplayState = REPLAY_STATE_IDLE;
+                }
+                break;
+
+            case REPLAY_STATE_ERROR:
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                xReplayState = REPLAY_STATE_IDLE;
+                break;
+        }
+        */
     }
 }
 

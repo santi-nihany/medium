@@ -215,7 +215,8 @@ static void createTasks(void)
         &xTaskHousekeeping
     );
 
-    /* Create Test Storage Task */
+    /* Test Storage Task - disabled for basic RTOS verification
+     * Enable when SD card is connected and ready for testing
     xTaskCreate(
         vStorageTest_Task,
         "StorageTest",
@@ -224,7 +225,8 @@ static void createTasks(void)
         PRIORITY_TEST_STORAGE_TASK,
         &xTaskTestStorage
     );
-    
+    */
+
     printf("Tasks created.\r\n");
 }
 
