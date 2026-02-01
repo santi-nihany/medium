@@ -33,9 +33,8 @@
 /*==================[internal data]==========================================*/
 
 static FATFS fs;           // FatFs work area needed for each volume
-static FIL fil;            // File object
+static FIL fil;            // File object (only use from Storage_Task!)
 static BaseType_t sd_mounted = pdFALSE;
-static SemaphoreHandle_t xStorageInUse = NULL;
 
 /*==================[external data]==========================================*/
 
@@ -51,29 +50,47 @@ extern SemaphoreHandle_t xStorageMutex;
 static BaseType_t MountSD(void)
 {
     FRESULT fr;
-    
+    static BaseType_t spi_initialized = pdFALSE;
+
     if (sd_mounted) {
         return pdPASS; // Already mounted
     }
-    
+
     printf("[Storage] Initializing SD card...\r\n");
-    
-    // Initialize SD card SPI driver
-    FSSDC_InitSPI();
-    
-    // Mount the SD card filesystem
-    fr = f_mount(&fs, "SDC:", 1); // 1 = force mount
-    
+
+    // Initialize SD card SPI driver (only once)
+    if (!spi_initialized) {
+        FSSDC_InitSPI();
+        spi_initialized = pdTRUE;
+
+        // Wait for disk timer to run a few times (important for card init)
+        printf("[Storage] Waiting for card to stabilize...\r\n");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    // Register filesystem (delayed mount - 0)
+    fr = f_mount(&fs, "SDC:", 0);
+    if (fr != FR_OK) {
+        printf("[Storage] ERROR: f_mount failed (FRESULT=%d)\r\n", fr);
+        return pdFAIL;
+    }
+
+    // Force mount by accessing the volume
+    // This triggers actual card initialization
+    DWORD fre_clust;
+    FATFS *fs_ptr;
+    fr = f_getfree("SDC:", &fre_clust, &fs_ptr);
+
     if (fr == FR_OK) {
         sd_mounted = pdTRUE;
         printf("[Storage] SD card mounted successfully\r\n");
-        
+
         // Create signals directory if it doesn't exist
         f_mkdir("SDC:/signals");
-        
+
         return pdPASS;
     } else {
-        printf("[Storage] ERROR: Failed to mount SD card (FRESULT=%d)\r\n", fr);
+        printf("[Storage] ERROR: Failed to access SD card (FRESULT=%d)\r\n", fr);
         sd_mounted = pdFALSE;
         return pdFAIL;
     }

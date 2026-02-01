@@ -57,8 +57,9 @@ void vMyTask(void *pvParameters)
 
 ## Testing Strategy
 1. Enable ONE task at a time with printf/vTaskDelay to verify scheduling
-2. Use `test_storage.c` to inject synthetic packets without hardware
-3. Monitor heap with Housekeeping task
+2. Use `mock_signal_generator.c` to test full IPC flow without hardware
+3. Use `test_storage.c` to inject synthetic packets directly
+4. Monitor heap with Housekeeping task (should remain stable)
 
 ## File Structure
 - `src/` - Source files (.c)
@@ -73,9 +74,12 @@ void vMyTask(void *pvParameters)
 - Watchdog
 
 ## FatFS Integration
-- `diskTickHook()` MUST be called every 10ms (via tickCallbackSet)
+- **IMPORTANT**: `tickCallbackSet()` does NOT work with FreeRTOS!
+- Use `xDiskTimer` (FreeRTOS software timer, 10ms) to call `disk_timerproc()`
 - Use `xStorageMutex` for exclusive SD access
+- Wait 500ms after `FSSDC_InitSPI()` before mounting (let timer stabilize card)
 - File path format: `SDC:/signals/signal_IR_000001.sig`
+- File format: ASCII header + binary samples
 
 ## Common Pitfalls to Avoid
 1. Don't use `xTaskGetTickCountFromISR()` in task context - use `xTaskGetTickCount()`

@@ -19,6 +19,7 @@
 #include "stream_buffer.h"
 #include "queue.h"
 #include "semphr.h"
+#include "timers.h"
 
 #include "sapi.h"
 
@@ -33,9 +34,10 @@
 /* FatFS includes for disk timer */
 #include "ff.h"
 
-/* Forward declaration */
+/* Forward declarations */
 void diskTickHook(void *ptr);
 void disk_timerproc(void);
+static void vDiskTimerCallback(TimerHandle_t xTimer);
 
 /*==================[macros and definitions]=================================*/
 
@@ -71,6 +73,7 @@ StreamBufferHandle_t xStreamBufferRF = NULL;
 QueueHandle_t xStorageQueue = NULL;
 QueueHandle_t xUICommandQueue = NULL;
 SemaphoreHandle_t xStorageMutex = NULL;
+TimerHandle_t xDiskTimer = NULL;
 
 /* Task handles */
 static TaskHandle_t xTaskSignalCaptureIR = NULL;
@@ -103,10 +106,9 @@ static void initHardware(void)
     /* SPI configuration for SD card */
     spiConfig(SPI0);
     
-    /* Configure tick hook for disk timer (required by FatFS) */
-    tickConfig(10);  // 10ms tick resolution
-    tickCallbackSet(diskTickHook, NULL);
-    
+    /* Note: tickConfig/tickCallbackSet don't work with FreeRTOS
+     * Disk timing is handled by xDiskTimer software timer instead */
+
     /* TODO: Initialize IR receiver/transmitter */
     /* TODO: Initialize RF receiver/transmitter */
     /* TODO: Initialize LCD display */
@@ -151,7 +153,26 @@ static void initRTOSPrimitives(void)
         printf("ERROR: Failed to create Storage Mutex!\r\n");
         while (1);
     }
-    
+
+    /* Create Disk Timer for FatFS (10ms period, auto-reload) */
+    xDiskTimer = xTimerCreate(
+        "DiskTimer",
+        pdMS_TO_TICKS(10),      /* 10ms period */
+        pdTRUE,                  /* Auto-reload */
+        NULL,                    /* Timer ID (unused) */
+        vDiskTimerCallback       /* Callback function */
+    );
+    if (xDiskTimer == NULL) {
+        printf("ERROR: Failed to create Disk Timer!\r\n");
+        while (1);
+    }
+
+    /* Start the disk timer */
+    if (xTimerStart(xDiskTimer, 0) != pdPASS) {
+        printf("ERROR: Failed to start Disk Timer!\r\n");
+        while (1);
+    }
+
     printf("RTOS primitives created.\r\n");
 }
 
@@ -289,12 +310,23 @@ int main(void)
 }
 
 /**
- * @brief Disk timer hook (required by FatFS)
- * Must be called periodically (every 10ms) for SD card timing
+ * @brief Disk timer callback (FreeRTOS software timer)
+ * Called every 10ms to drive FatFS timing for SD card operations
+ */
+static void vDiskTimerCallback(TimerHandle_t xTimer)
+{
+    (void)xTimer;
+    disk_timerproc();  // FatFS internal timing function
+}
+
+/**
+ * @brief Legacy disk tick hook (not used with FreeRTOS)
+ * Kept for compatibility but sAPI tickCallbackSet doesn't work with FreeRTOS
  */
 void diskTickHook(void *ptr)
 {
-    disk_timerproc();  // Disk timer process (FatFS internal function)
+    (void)ptr;
+    /* This is never called when using FreeRTOS - use vDiskTimerCallback instead */
 }
 
 /*==================[end of file]============================================*/
