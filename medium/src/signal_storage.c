@@ -17,6 +17,7 @@
 /* FatFS includes */
 #include "ff.h"
 #include "fssdc.h"
+#include "sapi.h"
 
 /*==================[macros and definitions]=================================*/
 
