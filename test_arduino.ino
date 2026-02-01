@@ -1,63 +1,90 @@
-#include <IRremote.hpp>   // Librería IRremote moderna (v3.x o superior)
+#include <IRremote.hpp>
 
-// ==================== CONFIGURACIÓN ====================
+// ===== CONFIGURACIÓN =====
+#define IR_RECEIVE_PIN 2
+#define IR_SEND_PIN    3
+#define BUTTON_PIN     4
 
-// Pines
-#define PIN_IR_SEND    3    // Pin de salida IR LED
-#define PIN_IR_RECV    2    // Pin de entrada IR receptor
-#define PIN_BUTTON     4    // Pulsador
-#define PIN_LED        13   // LED indicador
+// NEC a emitir (configurable)
+#define NEC_ADDRESS 0x20
+#define NEC_COMMAND 0x10
 
-// Parámetros NEC (pueden cambiarse fácilmente)
-#define NEC_ADDRESS    0x10AF   // Dirección arbitraria
-#define NEC_COMMAND    0xA25D   // Comando arbitrario
+// ========================
 
-// ==================== SETUP ====================
-void setup() {
-  Serial.begin(115200);
-  pinMode(PIN_LED, OUTPUT);
-  pinMode(PIN_BUTTON, INPUT_PULLUP);
-
-  IrSender.begin(PIN_IR_SEND, ENABLE_LED_FEEDBACK); // Inicia emisor
-  IrReceiver.begin(PIN_IR_RECV, ENABLE_LED_FEEDBACK); // Inicia receptor
-
-  Serial.println("Sistema IR listo.");
-  Serial.println("Presione el botón para emitir una señal NEC...");
+// Convierte byte a binario tipo 0bxxxxxxxx
+void printBinary(uint8_t value) {
+  Serial.print("0b");
+  for (int i = 7; i >= 0; i--) {
+    Serial.print((value >> i) & 1);
+  }
 }
 
-// ==================== LOOP ====================
+void setup() {
+  Serial.begin(115200);
+  delay(200);
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  IrReceiver.begin(IR_RECEIVE_PIN, ENABLE_LED_FEEDBACK);
+  IrSender.begin(IR_SEND_PIN);
+
+  Serial.println("IR Analyzer + NEC Sender listo");
+  Serial.println("--------------------------------");
+}
+
 void loop() {
 
-  // --- Cuando se presiona el botón ---
-  if (digitalRead(PIN_BUTTON) == LOW) {
-    Serial.println("Transmitiendo señal NEC...");
-    IrSender.sendNEC(NEC_ADDRESS, NEC_COMMAND, 0);  // Enviar una sola vez
-    delay(1000); // Pequeño retardo para evitar rebote
-  }
-
-  // --- Escucha de señales IR ---
+  // ===== RECEPCIÓN IR =====
   if (IrReceiver.decode()) {
-    // Extraer datos recibidos
-    uint16_t recvAddress = IrReceiver.decodedIRData.address;
-    uint16_t recvCommand = IrReceiver.decodedIRData.command;
-    decode_type_t proto = IrReceiver.decodedIRData.protocol;
 
-    Serial.print("Recibido -> Protocolo: ");
-    Serial.print(getProtocolString(proto));
-    Serial.print(", Addr: 0x");
-    Serial.print(recvAddress, HEX);
-    Serial.print(", Cmd: 0x");
-    Serial.println(recvCommand, HEX);
+    Serial.print("Protocol: ");
+    Serial.println(IrReceiver.decodedIRData.protocol);
 
-    // Comparar con la señal esperada
-    if (proto == NEC && recvAddress == NEC_ADDRESS && recvCommand == NEC_COMMAND) {
-      digitalWrite(PIN_LED, HIGH);
-      Serial.println("Coincidencia detectada ");
-    } else {
-      digitalWrite(PIN_LED, LOW);
-      Serial.println("No coincide ");
-    }
+    Serial.print("Address: 0x");
+    Serial.print(IrReceiver.decodedIRData.address, HEX);
+    Serial.print("  ");
+    printBinary(IrReceiver.decodedIRData.address);
+    Serial.println();
 
-    IrReceiver.resume(); // Preparar para la próxima recepción
+    Serial.print("Command: 0x");
+    Serial.print(IrReceiver.decodedIRData.command, HEX);
+    Serial.print("  ");
+    printBinary(IrReceiver.decodedIRData.command);
+    Serial.println();
+
+    Serial.print("Raw length: ");
+    Serial.println(IrReceiver.decodedIRData.rawDataPtr->rawlen);
+
+    Serial.println("-----");
+
+    IrReceiver.resume();
   }
+
+  // ===== ENVÍO NEC POR BOTÓN =====
+  static bool lastButton = HIGH;
+  bool button = digitalRead(BUTTON_PIN);
+
+  if (lastButton == HIGH && button == LOW) {
+    Serial.println("BOTON PRESIONADO -> Enviando NEC");
+
+    IrSender.sendNEC(NEC_ADDRESS, NEC_COMMAND, 0);
+
+    Serial.print("TX Address: 0x");
+    Serial.print(NEC_ADDRESS, HEX);
+    Serial.print(" ");
+    printBinary(NEC_ADDRESS);
+    Serial.println();
+
+    Serial.print("TX Command: 0x");
+    Serial.print(NEC_COMMAND, HEX);
+    Serial.print(" ");
+    printBinary(NEC_COMMAND);
+    Serial.println();
+
+    Serial.println("-----");
+
+    delay(300); // debounce simple
+  }
+
+  lastButton = button;
 }
