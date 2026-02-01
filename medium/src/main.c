@@ -28,6 +28,7 @@
 #include "ui_controller.h"
 #include "housekeeping.h"
 #include "test_storage.h"
+#include "mock_signal_generator.h"
 
 /* FatFS includes for disk timer */
 #include "ff.h"
@@ -46,6 +47,7 @@ void disk_timerproc(void);
 #define PRIORITY_UI_TASK               1
 #define PRIORITY_HOUSEKEEPING_TASK     1
 #define PRIORITY_TEST_STORAGE_TASK     1
+#define PRIORITY_MOCK_GENERATOR        1  /* Low priority - runs in background */
 
 /* Task stack sizes */
 #define STACK_SIZE_CAPTURE            512
@@ -54,6 +56,7 @@ void disk_timerproc(void);
 #define STACK_SIZE_UI                1024
 #define STACK_SIZE_HOUSEKEEPING       256
 #define STACK_SIZE_TEST_STORAGE       512
+#define STACK_SIZE_MOCK_GENERATOR     256
 
 /* StreamBuffer and Queue sizes */
 #define STREAM_BUFFER_SIZE           2048
@@ -77,6 +80,7 @@ static TaskHandle_t xTaskReplay = NULL;
 static TaskHandle_t xTaskUI = NULL;
 static TaskHandle_t xTaskHousekeeping = NULL;
 static TaskHandle_t xTaskTestStorage = NULL;
+static TaskHandle_t xTaskMockGenerator = NULL;
 
 /*==================[external functions definition]==========================*/
 
@@ -226,6 +230,16 @@ static void createTasks(void)
         &xTaskTestStorage
     );
     */
+
+    /* Mock Signal Generator - for IPC testing without hardware */
+    xTaskCreate(
+        vMockSignalGenerator_Task,
+        "MockGen",
+        STACK_SIZE_MOCK_GENERATOR,
+        NULL,
+        PRIORITY_MOCK_GENERATOR,
+        &xTaskMockGenerator
+    );
 
     printf("Tasks created.\r\n");
 }

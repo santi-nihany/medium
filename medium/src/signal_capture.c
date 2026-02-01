@@ -27,19 +27,12 @@ void vSignalCaptureIR_Task(void *pvParameters)
 {
     uint32_t sample_buffer[256];
     SignalPacket_t *packet = NULL;
-    uint32_t bytes_received;
+    size_t bytes_received;
 
-    (void)sample_buffer;  /* Suppress unused warning for now */
-    (void)packet;
-    (void)bytes_received;
-
-    printf("SignalCaptureIR Task started.\r\n");
+    printf("[CaptureIR] Task started, waiting for data...\r\n");
 
     for (;;) {
-        printf("hello from signal capture IR\r\n");
-        vTaskDelay(pdMS_TO_TICKS(2000));
-
-        /* TODO: Enable when ready for IPC testing
+        /* Block waiting for data from StreamBuffer (from ISR or mock generator) */
         bytes_received = xStreamBufferReceive(
             xStreamBufferIR,
             sample_buffer,
@@ -47,23 +40,32 @@ void vSignalCaptureIR_Task(void *pvParameters)
             portMAX_DELAY
         );
 
-        if (bytes_received > 0 && xIRCaptureActive) {
+        if (bytes_received > 0) {
+            uint32_t sample_count = bytes_received / sizeof(uint32_t);
+            printf("[CaptureIR] Received %lu bytes (%lu samples)\r\n",
+                   (unsigned long)bytes_received, (unsigned long)sample_count);
+
+            /* Allocate packet with room for data */
             packet = pvPortMalloc(sizeof(SignalPacket_t) + bytes_received);
             if (packet != NULL) {
                 packet->mode = SIGNAL_MODE_IR;
-                packet->timestamp_ms = capture_start_time;
-                packet->sample_count = bytes_received / sizeof(uint32_t);
+                packet->timestamp_ms = xTaskGetTickCount();
+                packet->sample_count = sample_count;
                 memcpy(packet->data, sample_buffer, bytes_received);
 
+                /* Send pointer to storage queue */
                 if (xStorageQueue != NULL) {
-                    if (xQueueSend(xStorageQueue, &packet, 0) != pdPASS) {
+                    if (xQueueSend(xStorageQueue, &packet, pdMS_TO_TICKS(100)) == pdPASS) {
+                        printf("[CaptureIR] Packet sent to storage queue\r\n");
+                    } else {
                         vPortFree(packet);
-                        printf("ERROR: Storage queue full!\r\n");
+                        printf("[CaptureIR] ERROR: Storage queue full!\r\n");
                     }
                 }
+            } else {
+                printf("[CaptureIR] ERROR: Failed to allocate packet!\r\n");
             }
         }
-        */
     }
 }
 
@@ -71,17 +73,17 @@ void vSignalCaptureRF_Task(void *pvParameters)
 {
     uint32_t sample_buffer[256];
     SignalPacket_t *packet = NULL;
-    uint32_t bytes_received;
+    size_t bytes_received;
 
-    (void)sample_buffer;  /* Suppress unused warning for now */
+    (void)sample_buffer;  /* Suppress unused warning - RF not used in mock test */
     (void)packet;
     (void)bytes_received;
 
-    printf("SignalCaptureRF Task started.\r\n");
+    printf("[CaptureRF] Task started (idle for mock test)\r\n");
 
     for (;;) {
-        printf("hello from signal capture RF\r\n");
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        /* RF task stays idle during mock testing - only IR is tested */
+        vTaskDelay(pdMS_TO_TICKS(10000));
         // /* Wait for watermark or notification that capture is complete */
         // bytes_received = xStreamBufferReceive(
         //     xStreamBufferRF,

@@ -17,7 +17,10 @@
 /* FatFS includes */
 #include "ff.h"
 #include "fssdc.h"
-#include "sapi.h"
+
+/* FreeRTOS for heap monitoring */
+#include "FreeRTOS.h"
+#include "task.h"
 
 /*==================[macros and definitions]=================================*/
 
@@ -105,100 +108,48 @@ static BaseType_t GenerateFilename(char *filename, uint8_t mode)
 void vStorage_Task(void *pvParameters)
 {
     SignalPacket_t *packet = NULL;
-    char filename[64];
-    FRESULT fr;
-    UINT bytes_written;
-    UINT total_bytes = 0;
-    
-    printf("[Storage] Storage Task started\r\n");
+    static uint32_t packets_received = 0;
 
-    /* Note: xStorageMutex is created in main.c, no need to create another */
+    printf("[Storage] Storage Task started (IPC test mode - no SD write)\r\n");
 
-    // Mount SD card
+    /* Skip SD mount for IPC testing */
+    #if 0
     if (MountSD() != pdPASS) {
         printf("[Storage] ERROR: Cannot mount SD card, task will retry\r\n");
     }
-    
+    #endif
+
     // Main task loop
     for (;;) {
         // Wait for packets from capture tasks
         if (xQueueReceive(xStorageQueue, &packet, portMAX_DELAY) == pdPASS) {
-            
-            // Take storage mutex (only one task can access SD)
-            if (xSemaphoreTake(xStorageMutex, portMAX_DELAY) == pdPASS) {
-                
-                // Check if SD is mounted
-                if (!sd_mounted) {
-                    if (MountSD() != pdPASS) {
-                        printf("[Storage] ERROR: Cannot write, SD not mounted\r\n");
-                        vPortFree(packet);
-                        xSemaphoreGive(xStorageMutex);
-                        continue;
-                    }
+            packets_received++;
+
+            /* Print packet info for IPC verification */
+            printf("[Storage] === PACKET RECEIVED (#%lu) ===\r\n", (unsigned long)packets_received);
+            printf("[Storage]   Mode: %s\r\n", (packet->mode == SIGNAL_MODE_IR) ? "IR" : "RF");
+            printf("[Storage]   Timestamp: %lu ticks\r\n", (unsigned long)packet->timestamp_ms);
+            printf("[Storage]   Samples: %lu\r\n", (unsigned long)packet->sample_count);
+
+            /* Print first few samples for verification */
+            if (packet->sample_count > 0) {
+                printf("[Storage]   First samples: ");
+                uint32_t max_print = (packet->sample_count < 4) ? packet->sample_count : 4;
+                for (uint32_t i = 0; i < max_print; i++) {
+                    uint32_t sample = ((uint32_t*)packet->data)[i];
+                    uint32_t delta = sample & 0x00FFFFFF;
+                    uint8_t level = (sample >> 24) & 0xFF;
+                    printf("[d=%lu,l=%u] ", (unsigned long)delta, level);
                 }
-                
-                // Generate filename
-                if (GenerateFilename(filename, packet->mode) == pdPASS) {
-                    
-                    printf("[Storage] Saving signal to: %s\r\n", filename);
-                    
-                    // Open file for writing (create new file)
-                    fr = f_open(&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
-                    
-                    if (fr == FR_OK) {
-                        
-                        // Write file header (simple version)
-                        char header[64];
-                        int n = sprintf(header, "MED1;VER1;TS=%lu;MODE=%d;SAMPLES=%lu\r\n",
-                                        packet->timestamp_ms,
-                                        packet->mode,
-                                        packet->sample_count);
-                        f_write(&fil, header, n, &bytes_written);
-                        total_bytes = bytes_written;
-                        
-                        // Write signal data
-                        uint32_t data_size = sizeof(uint32_t) * packet->sample_count;
-                        fr = f_write(&fil, packet->data, data_size, &bytes_written);
-                        total_bytes += bytes_written;
-                        
-                        // Close file
-                        f_close(&fil);
-                        
-                        if (fr == FR_OK) {
-                            printf("[Storage] Wrote %d bytes to %s\r\n", total_bytes, filename);
-                            gpioWrite(LEDG, ON);
-                            vTaskDelay(pdMS_TO_TICKS(100));
-                            gpioWrite(LEDG, OFF);
-                        } else {
-                            printf("[Storage] ERROR: Write failed (FRESULT=%d)\r\n", fr);
-                            gpioWrite(LEDR, ON);
-                        }
-                        
-                    } else {
-                        printf("[Storage] ERROR: Cannot open file (FRESULT=%d)\r\n", fr);
-                        gpioWrite(LEDR, ON);
-                    }
-                    
-                } else {
-                    printf("[Storage] ERROR: Cannot generate filename\r\n");
-                    gpioWrite(LEDR, ON);
-                }
-                
-                // Free packet memory
-                vPortFree(packet);
-                
-                // Release mutex
-                xSemaphoreGive(xStorageMutex);
-                
-            } else {
-                // Mutex timeout or error
-                printf("[Storage] WARNING: Cannot take mutex\r\n");
-                vPortFree(packet); // Free packet to avoid memory leak
+                printf("\r\n");
             }
+
+            /* Free packet memory (important for heap stability) */
+            vPortFree(packet);
+            printf("[Storage]   Packet freed, heap: %lu bytes\r\n",
+                   (unsigned long)xPortGetFreeHeapSize());
+            printf("[Storage] =============================\r\n");
         }
-        
-        // Small delay to prevent CPU spinning
-        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
