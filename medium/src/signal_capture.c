@@ -26,45 +26,76 @@ extern SemaphoreHandle_t xStorageMutex;
 void vSignalCaptureIR_Task(void *pvParameters)
 {
     uint32_t sample_buffer[256];
-    SignalPacket_t *packet = NULL;
+    uint32_t total_samples = 0;
     size_t bytes_received;
+    SignalPacket_t *packet = NULL;
+    TickType_t capture_start = 0;
+
+    /* Timeout to detect end of signal burst (no new edges) */
+    const TickType_t BURST_TIMEOUT_MS = 100;
 
     printf("[CaptureIR] Task started, waiting for data...\r\n");
 
     for (;;) {
-        /* Block waiting for data from StreamBuffer (from ISR or mock generator) */
+        /* Wait indefinitely for first sample of a burst */
         bytes_received = xStreamBufferReceive(
             xStreamBufferIR,
-            sample_buffer,
-            sizeof(sample_buffer),
+            &sample_buffer[total_samples],
+            sizeof(uint32_t),
             portMAX_DELAY
         );
 
         if (bytes_received > 0) {
-            uint32_t sample_count = bytes_received / sizeof(uint32_t);
-            printf("[CaptureIR] Received %lu bytes (%lu samples)\r\n",
-                   (unsigned long)bytes_received, (unsigned long)sample_count);
+            /* First sample received - record timestamp */
+            capture_start = xTaskGetTickCount();
+            total_samples = bytes_received / sizeof(uint32_t);
 
-            /* Allocate packet with room for data */
-            packet = pvPortMalloc(sizeof(SignalPacket_t) + bytes_received);
+            /* Continue receiving with timeout until no more data */
+            while (total_samples < 256) {
+                size_t space_left = (256 - total_samples) * sizeof(uint32_t);
+
+                bytes_received = xStreamBufferReceive(
+                    xStreamBufferIR,
+                    &sample_buffer[total_samples],
+                    space_left,
+                    pdMS_TO_TICKS(BURST_TIMEOUT_MS)
+                );
+
+                if (bytes_received == 0) {
+                    /* Timeout - no more data, burst complete */
+                    break;
+                }
+
+                total_samples += bytes_received / sizeof(uint32_t);
+            }
+
+            /* Burst complete - create and send packet */
+            printf("[CaptureIR] Burst complete: %lu samples captured\r\n",
+                   (unsigned long)total_samples);
+
+            size_t data_size = total_samples * sizeof(uint32_t);
+            packet = pvPortMalloc(sizeof(SignalPacket_t) + data_size);
+
             if (packet != NULL) {
                 packet->mode = SIGNAL_MODE_IR;
-                packet->timestamp_ms = xTaskGetTickCount();
-                packet->sample_count = sample_count;
-                memcpy(packet->data, sample_buffer, bytes_received);
+                packet->timestamp_ms = capture_start;
+                packet->sample_count = total_samples;
+                memcpy(packet->data, sample_buffer, data_size);
 
-                /* Send pointer to storage queue */
-                if (xStorageQueue != NULL) {
-                    if (xQueueSend(xStorageQueue, &packet, pdMS_TO_TICKS(100)) == pdPASS) {
-                        printf("[CaptureIR] Packet sent to storage queue\r\n");
-                    } else {
-                        vPortFree(packet);
-                        printf("[CaptureIR] ERROR: Storage queue full!\r\n");
-                    }
+                /* Send to storage queue */
+                if (xQueueSend(xStorageQueue, &packet, pdMS_TO_TICKS(1000)) == pdPASS) {
+                    printf("[CaptureIR] Packet (%lu samples) sent to queue\r\n",
+                           (unsigned long)total_samples);
+                } else {
+                    vPortFree(packet);
+                    printf("[CaptureIR] ERROR: Queue full, packet dropped!\r\n");
                 }
             } else {
                 printf("[CaptureIR] ERROR: Failed to allocate packet!\r\n");
             }
+
+            /* Reset for next burst */
+            total_samples = 0;
         }
     }
 }
