@@ -108,47 +108,115 @@ static BaseType_t GenerateFilename(char *filename, uint8_t mode)
 void vStorage_Task(void *pvParameters)
 {
     SignalPacket_t *packet = NULL;
-    static uint32_t packets_received = 0;
+    char filename[64];
+    FRESULT fr;
+    UINT bytes_written;
+    uint32_t total_bytes;
+    static uint32_t packets_saved = 0;
 
-    printf("[Storage] Storage Task started (IPC test mode - no SD write)\r\n");
+    /* Limit packets for testing - set to 0 for unlimited */
+    const uint32_t MAX_TEST_PACKETS = 5;
 
-    /* Skip SD mount for IPC testing */
-    #if 0
+    printf("[Storage] Storage Task started (SD write enabled)\r\n");
+
+    /* Mount SD card */
     if (MountSD() != pdPASS) {
-        printf("[Storage] ERROR: Cannot mount SD card, task will retry\r\n");
+        printf("[Storage] WARNING: SD mount failed, will retry on first write\r\n");
     }
-    #endif
 
     // Main task loop
     for (;;) {
         // Wait for packets from capture tasks
         if (xQueueReceive(xStorageQueue, &packet, portMAX_DELAY) == pdPASS) {
-            packets_received++;
 
-            /* Print packet info for IPC verification */
-            printf("[Storage] === PACKET RECEIVED (#%lu) ===\r\n", (unsigned long)packets_received);
-            printf("[Storage]   Mode: %s\r\n", (packet->mode == SIGNAL_MODE_IR) ? "IR" : "RF");
-            printf("[Storage]   Timestamp: %lu ticks\r\n", (unsigned long)packet->timestamp_ms);
-            printf("[Storage]   Samples: %lu\r\n", (unsigned long)packet->sample_count);
-
-            /* Print first few samples for verification */
-            if (packet->sample_count > 0) {
-                printf("[Storage]   First samples: ");
-                uint32_t max_print = (packet->sample_count < 4) ? packet->sample_count : 4;
-                for (uint32_t i = 0; i < max_print; i++) {
-                    uint32_t sample = ((uint32_t*)packet->data)[i];
-                    uint32_t delta = sample & 0x00FFFFFF;
-                    uint8_t level = (sample >> 24) & 0xFF;
-                    printf("[d=%lu,l=%u] ", (unsigned long)delta, level);
-                }
-                printf("\r\n");
+            /* Check if we've reached the test limit */
+            if (MAX_TEST_PACKETS > 0 && packets_saved >= MAX_TEST_PACKETS) {
+                printf("[Storage] Test limit reached (%lu packets), discarding\r\n",
+                       (unsigned long)MAX_TEST_PACKETS);
+                vPortFree(packet);
+                continue;
             }
 
-            /* Free packet memory (important for heap stability) */
+            /* Print packet info */
+            printf("[Storage] === PACKET #%lu ===\r\n", (unsigned long)(packets_saved + 1));
+            printf("[Storage]   Mode: %s, Samples: %lu\r\n",
+                   (packet->mode == SIGNAL_MODE_IR) ? "IR" : "RF",
+                   (unsigned long)packet->sample_count);
+
+            /* Try to mount SD if not mounted */
+            if (!sd_mounted) {
+                printf("[Storage] Attempting SD mount...\r\n");
+                if (MountSD() != pdPASS) {
+                    printf("[Storage] ERROR: SD mount failed, packet discarded\r\n");
+                    vPortFree(packet);
+                    continue;
+                }
+            }
+
+            /* Take mutex for exclusive SD access */
+            if (xSemaphoreTake(xStorageMutex, pdMS_TO_TICKS(5000)) == pdPASS) {
+
+                /* Generate filename */
+                if (GenerateFilename(filename, packet->mode) == pdPASS) {
+
+                    printf("[Storage] Writing to: %s\r\n", filename);
+
+                    /* Open file for writing */
+                    fr = f_open(&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
+
+                    if (fr == FR_OK) {
+                        /* Write ASCII header */
+                        char header[80];
+                        int header_len = sprintf(header,
+                            "MED1;VER1;TS=%lu;MODE=%d;SAMPLES=%lu\r\n",
+                            (unsigned long)packet->timestamp_ms,
+                            packet->mode,
+                            (unsigned long)packet->sample_count);
+
+                        fr = f_write(&fil, header, header_len, &bytes_written);
+                        total_bytes = bytes_written;
+
+                        if (fr == FR_OK) {
+                            /* Write binary sample data */
+                            uint32_t data_size = packet->sample_count * sizeof(uint32_t);
+                            fr = f_write(&fil, packet->data, data_size, &bytes_written);
+                            total_bytes += bytes_written;
+                        }
+
+                        /* Close file */
+                        f_close(&fil);
+
+                        if (fr == FR_OK) {
+                            packets_saved++;
+                            printf("[Storage] SUCCESS: Wrote %lu bytes\r\n",
+                                   (unsigned long)total_bytes);
+                            printf("[Storage] Files saved: %lu/%lu\r\n",
+                                   (unsigned long)packets_saved,
+                                   (unsigned long)MAX_TEST_PACKETS);
+                        } else {
+                            printf("[Storage] ERROR: Write failed (FRESULT=%d)\r\n", fr);
+                        }
+
+                    } else {
+                        printf("[Storage] ERROR: Cannot open file (FRESULT=%d)\r\n", fr);
+                    }
+
+                } else {
+                    printf("[Storage] ERROR: Cannot generate filename\r\n");
+                }
+
+                /* Release mutex */
+                xSemaphoreGive(xStorageMutex);
+
+            } else {
+                printf("[Storage] ERROR: Cannot take mutex (timeout)\r\n");
+            }
+
+            /* Free packet memory */
             vPortFree(packet);
-            printf("[Storage]   Packet freed, heap: %lu bytes\r\n",
+            printf("[Storage] Heap: %lu bytes\r\n",
                    (unsigned long)xPortGetFreeHeapSize());
-            printf("[Storage] =============================\r\n");
+            printf("[Storage] ====================\r\n");
         }
     }
 }
