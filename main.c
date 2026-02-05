@@ -1,229 +1,367 @@
 #include "sapi.h"
 #include "chip.h"
+#include <stdint.h>
+#include <stdbool.h>
 
-// Configuración para interrupciones GPIO
-#define TIMEOUT_US 40000 // 40 ms sin cambios = fin de trama
-#define MAX_PULSES 200 // Cantidad máxima de pulsos a almacenar
-#define IR_GPIO_PIN GPIO7
-#define IR_EMITTER_PIN GPIO6
+// ==== CONFIGURACI?N GENERAL ====
+#define IR_INPUT_PIN          GPIO7     // Pin conectado a la salida del KY-022
+#define IR_IRQ_CHANNEL        0         // Canal de interrupci?n GPIO
+#define TIMEOUT_US            40000     // 40 ms sin cambios ? fin de trama
+#define MAX_PULSES            200       // M?ximo de pulsos almacenados
+#define MIN_PULSE_US          300       // Pulsos menores a esto son ruido/glitch
 
-// Canal de interrupción GPIO (PININT)
-#define IR_GPIO_IRQ_CHANNEL 0
+#define IR_TX_PIN GPIO5
 
-// Definiciones para tipos de flanco (tomadas de sapi_ultrasonic_hcsr04.c)
-#define RAISING_EDGE 0    /* Flanco ascendente (0→1) */
-#define FALLING_EDGE 1    /* Flanco descendente (1→0) */
-#define BOTH_EDGES 2      /* Ambos flancos */
+#define NEC_HDR_MARK   9000
+#define NEC_HDR_SPACE  4500
+#define NEC_BIT_MARK    560
+#define NEC_ONE_SPACE  1690
+#define NEC_ZERO_SPACE  560
+#define NEC_STOP_MARK   560
 
+typedef enum {
+   TX_IDLE,
+   TX_HDR_MARK,
+   TX_HDR_SPACE,
+   TX_BIT_MARK,
+   TX_BIT_SPACE,
+   TX_STOP
+} txState_t;
+
+volatile txState_t txState = TX_IDLE;
+
+volatile uint8_t txData[4];
+volatile uint8_t txByte = 0;
+volatile uint8_t txBit = 0;
+
+volatile bool txActive = false;
+
+
+// ==== ESTRUCTURA PARA GUARDAR LOS PULSOS ====
 typedef struct {
-uint8_t level; // 0 o 1
-uint32_t duration; // en microsegundos
+   uint8_t level;        // Nivel l?gico (0 o 1)
+   uint32_t duration;    // Duraci?n en microsegundos
 } IRPulse_t;
 
 static IRPulse_t pulseBuffer[MAX_PULSES];
 static uint16_t pulseCount = 0;
+static uint8_t lastLevel = 1;      // Estado inicial del pin (reposo = 1)
+static uint32_t lastTime = 0;      // Tiempo del ?ltimo flanco
+static bool tramaCompleta = false; // Se?al de trama lista para procesar
+static bool captureStarted = false; // Flag para ignorar el primer flanco
 
-// Variables para medición de tiempo
-static uint32_t pulseStartTime = 0;
-static uint8_t lastLevel = 1;
-static uint32_t lastPulseTime = 0;
-static bool_t tramaCompleta = false;
-
-// Timer para timeout
-static volatile bool_t timeoutReached = false;
-
-
-// --- Prototipos de funciones ---
-void emitirTrama(void);
-void initGPIOIrqs(void);
-void enableGPIOIrq(uint8_t irqChannel, uint8_t port, uint8_t pin, uint8_t edge);
-void disableGPIOIrq(uint8_t irqChannel);
-void clearInterrupt(uint8_t irqChannel);
-void initTimerForTimeout(void);
-void startTimeoutTimer(void);
-void stopTimeoutTimer(void);
-uint32_t getCurrentTimeUs(void);
-
-// --- Funciones de configuración de interrupciones GPIO ---
-void initGPIOIrqs(void) {
-   Chip_PININT_Init(LPC_GPIO_PIN_INT);
+// ==== TIMER para medir tiempo en microsegundos ====
+void timerUsInit(void) {
+   Chip_TIMER_Init(LPC_TIMER2);
+   Chip_TIMER_PrescaleSet(LPC_TIMER2, (Chip_Clock_GetRate(CLK_MX_TIMER2) / 1000000) - 1);
+   Chip_TIMER_Reset(LPC_TIMER2);
+   Chip_TIMER_Enable(LPC_TIMER2);
 }
 
-void enableGPIOIrq(uint8_t irqChannel, uint8_t port, uint8_t pin, uint8_t edge) {
-   // Seleccionar canal de interrupción para el pin GPIO
-   Chip_SCU_GPIOIntPinSel(irqChannel, port, pin);
-   
-   // Limpiar estado de interrupción
+uint32_t getTimeUs(void) {
+   return Chip_TIMER_ReadCount(LPC_TIMER2);
+}
+
+void resetTimeUs(void) {
+   Chip_TIMER_Reset(LPC_TIMER2);
+}
+
+// ==== INTERRUPCI?N POR FLANCO ====
+void GPIO0_IRQHandler(void) {
+
+    uint32_t fall = Chip_PININT_GetFallStates(LPC_GPIO_PIN_INT) & PININTCH(0);
+    uint32_t rise = Chip_PININT_GetRiseStates(LPC_GPIO_PIN_INT) & PININTCH(0);
+
+    if (fall || rise) {
+
+        uint32_t now = getTimeUs();
+
+        // Primer flanco: solo inicializar referencia de tiempo, no guardar pulso
+        if (!captureStarted) {
+            captureStarted = true;
+            lastTime = now;
+            // Actualizar nivel segun flanco
+            if (fall) {
+                lastLevel = 0;
+                Chip_PININT_ClearFallStates(LPC_GPIO_PIN_INT, PININTCH(0));
+            } else {
+                lastLevel = 1;
+                Chip_PININT_ClearRiseStates(LPC_GPIO_PIN_INT, PININTCH(0));
+            }
+            Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(0));
+            return;
+        }
+
+        uint32_t delta = now - lastTime;
+
+        // Filtrar glitches/rebotes: ignorar pulsos muy cortos
+        if (delta < MIN_PULSE_US) {
+            // Limpiar flags y salir sin guardar ni actualizar estado
+            if (fall) Chip_PININT_ClearFallStates(LPC_GPIO_PIN_INT, PININTCH(0));
+            if (rise) Chip_PININT_ClearRiseStates(LPC_GPIO_PIN_INT, PININTCH(0));
+            Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(0));
+            return;
+        }
+
+        lastTime = now;
+
+        // Guardar pulso
+        if (pulseCount < MAX_PULSES && delta < 60000) {
+
+            pulseBuffer[pulseCount].duration = delta;
+
+            // Nivel que acaba de terminar
+            pulseBuffer[pulseCount].level = lastLevel;
+
+            pulseCount++;
+        }
+
+        // Actualizar el nivel actual seg?n flanco
+        if (fall) {
+            lastLevel = 0;
+            Chip_PININT_ClearFallStates(LPC_GPIO_PIN_INT, PININTCH(0));
+        }
+        else if (rise) {
+            lastLevel = 1;
+            Chip_PININT_ClearRiseStates(LPC_GPIO_PIN_INT, PININTCH(0));
+        }
+
+        Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(0));
+    }
+}
+
+
+// ==== CONFIGURAR INTERRUPCI?N EN GPIO ==== check
+void enableIrqGPIO(uint8_t irqChannel, uint8_t port, uint8_t pin) {
+   Chip_SCU_GPIOIntPinSel(irqChannel, port, pin); // Seleccionar pin
    Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(irqChannel));
-   
-   // Configurar modo de flanco
-   Chip_PININT_SetPinModeEdge(LPC_GPIO_PIN_INT, PININTCH(irqChannel));
-
-   if (edge == RAISING_EDGE) {
-      Chip_PININT_EnableIntHigh(LPC_GPIO_PIN_INT, PININTCH(irqChannel));
-   } else if (edge == FALLING_EDGE) {
-      Chip_PININT_EnableIntLow(LPC_GPIO_PIN_INT, PININTCH(irqChannel));
-   } else {
-      // Ambos flancos
-      Chip_PININT_EnableIntHigh(LPC_GPIO_PIN_INT, PININTCH(irqChannel));
-      Chip_PININT_EnableIntLow(LPC_GPIO_PIN_INT, PININTCH(irqChannel));
-   }
-
-   // Limpiar interrupciones pendientes y habilitar
+   Chip_PININT_SetPinModeEdge(LPC_GPIO_PIN_INT, PININTCH(irqChannel)); // Modo flanco
+   Chip_PININT_EnableIntHigh(LPC_GPIO_PIN_INT, PININTCH(irqChannel));
+   Chip_PININT_EnableIntLow(LPC_GPIO_PIN_INT, PININTCH(irqChannel));
    NVIC_ClearPendingIRQ(PIN_INT0_IRQn + irqChannel);
    NVIC_EnableIRQ(PIN_INT0_IRQn + irqChannel);
 }
 
-void disableGPIOIrq(uint8_t irqChannel) {
-   NVIC_ClearPendingIRQ(PIN_INT0_IRQn + irqChannel);
-   NVIC_DisableIRQ(PIN_INT0_IRQn + irqChannel);
+//====== DECODIFICADOR NEC =======
+bool necDecode(IRPulse_t *pulses, uint16_t count,
+               uint8_t *address, uint8_t *command) 
+{
+    // --- Validar encabezado NEC ---
+    // Pulso 0 = LOW 9ms
+    if (!(pulses[0].level == 0 &&
+         pulses[0].duration > 8500 &&
+         pulses[0].duration < 9500)) {
+        return false;
+    }
+
+    // Pulso 1 = HIGH 4.5ms
+    if (!(pulses[1].level == 1 &&
+         pulses[1].duration > 4000 &&
+         pulses[1].duration < 5000)) {
+        return false;
+    }
+
+    uint32_t data = 0;
+
+    // Los bits NEC empiezan en pulso 2:
+    // Cada bit: LOW (560us) + HIGH (560us o 1690us)
+    // Pulso 2 = LOW 560
+    for (int i = 2; i+1 < count; i += 2) {
+
+        // Pulso LOW corto (start bit)
+        if (!(pulses[i].level == 0 &&
+             pulses[i].duration > 400 &&
+             pulses[i].duration < 700)) 
+        {
+            return false; // fallo en bit LOW
+        }
+
+        // Duraci?n HIGH = define bit
+        uint32_t high = pulses[i+1].duration;
+
+        uint8_t bit;
+
+        if (high > 400 && high < 700) {
+            bit = 0; // bit corto
+        }
+        else if (high > 1500 && high < 2000) {
+            bit = 1; // bit largo
+        }
+        else {
+            return false; // no coincide
+        }
+
+        data = (data >> 1) | (bit << 31); // NEC env?a LSB primero
+    }
+
+    uint8_t addr     =  data        & 0xFF;
+    uint8_t addrInv  = (data >> 8)  & 0xFF;
+    uint8_t cmd      = (data >> 16) & 0xFF;
+    uint8_t cmdInv   = (data >> 24) & 0xFF;
+
+    // Verificaci?n NEC obligatoria
+    if (addr != (uint8_t)~addrInv) return false;
+    if (cmd  != (uint8_t)~cmdInv)  return false;
+
+    *address = addr;
+    *command = cmd;
+
+    return true;
 }
 
-void clearInterrupt(uint8_t irqChannel) {
-   Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(irqChannel));
+static inline void irCarrierOn(void)
+{
+   gpioWrite(IR_TX_PIN, 1);
 }
 
-// --- Funciones de timer para medición de tiempo y timeout ---
-void initTimerForTimeout(void) {
-   // Inicializar TIMER1 para medición de tiempo
-   Chip_TIMER_Init(LPC_TIMER1);
-   Chip_TIMER_PrescaleSet(LPC_TIMER1, (Chip_Clock_GetRate(CLK_MX_TIMER1) / 1000000) - 1);
-   
-   // Configurar TIMER2 para delays
-   Chip_TIMER_Init(LPC_TIMER2);
-   Chip_TIMER_PrescaleSet(LPC_TIMER2, (Chip_Clock_GetRate(CLK_MX_TIMER2) / 1000000) - 1);
+static inline void irCarrierOff(void)
+{
+   gpioWrite(IR_TX_PIN, 0);
 }
 
-uint32_t getCurrentTimeUs(void) {
-   return Chip_TIMER_ReadCount(LPC_TIMER1);
-}
+void irTxCallback(void* ptr)
+{
+   uint32_t nextTimeUs = 0;
 
-void startTimeoutTimer(void) {
-   // Configurar match para timeout
-   Chip_TIMER_SetMatch(LPC_TIMER1, 1, TIMEOUT_US);
-   Chip_TIMER_MatchEnableInt(LPC_TIMER1, 1);
-   Chip_TIMER_Reset(LPC_TIMER1);
-   Chip_TIMER_Enable(LPC_TIMER1);
-   timeoutReached = false;
-}
+   switch (txState) {
 
-void stopTimeoutTimer(void) {
-   Chip_TIMER_Disable(LPC_TIMER1);
-   Chip_TIMER_MatchDisableInt(LPC_TIMER1, 1);
-}
+   case TX_HDR_MARK:
+      irCarrierOn();
+      nextTimeUs = NEC_HDR_MARK;
+      txState = TX_HDR_SPACE;
+      break;
 
-// Delay en microsegundos usando TIMER2
-void delay_us(uint32_t us) {
-   if (us == 0) return;
-   Chip_TIMER_Reset(LPC_TIMER2);
-   Chip_TIMER_Enable(LPC_TIMER2);
-   while (Chip_TIMER_ReadCount(LPC_TIMER2) < us) {
-   }
-   Chip_TIMER_Disable(LPC_TIMER2);
-}
+   case TX_HDR_SPACE:
+      irCarrierOff();
+      nextTimeUs = NEC_HDR_SPACE;
+      txState = TX_BIT_MARK;
+      txByte = 0;
+      txBit = 0;
+      break;
 
-// --- ISR para interrupciones GPIO ---
-void PIN_INT0_IRQHandler(void) {
-   uint32_t currentTime = getCurrentTimeUs();
-   uint8_t currentLevel = gpioRead(IR_GPIO_PIN);
-   
-   // Si hay un cambio de nivel
-   if (currentLevel != lastLevel) {
-      // Guardar el pulso anterior si hay espacio
-      if (pulseCount < MAX_PULSES) {
-         pulseBuffer[pulseCount].level = lastLevel;
-         pulseBuffer[pulseCount].duration = currentTime - pulseStartTime;
-         pulseCount++;
-      }
-      
-      // Actualizar variables para el próximo pulso
-      lastLevel = currentLevel;
-      pulseStartTime = currentTime;
-      
-      // Reiniciar timer de timeout
-      startTimeoutTimer();
-   }
-   
-   // Limpiar flag de interrupción
-   clearInterrupt(IR_GPIO_IRQ_CHANNEL);
-}
+   case TX_BIT_MARK:
+      irCarrierOn();
+      nextTimeUs = NEC_BIT_MARK;
+      txState = TX_BIT_SPACE;
+      break;
 
-// --- ISR para timeout del timer ---
-void TIMER1_IRQHandler(void) {
-   if (Chip_TIMER_MatchPending(LPC_TIMER1, 1)) {
-      Chip_TIMER_ClearMatch(LPC_TIMER1, 1);
-      
-      // Timeout alcanzado - fin de trama
-      if (pulseCount > 0) {
-         // Guardar último pulso
-         if (pulseCount < MAX_PULSES) {
-            pulseBuffer[pulseCount].level = lastLevel;
-            pulseBuffer[pulseCount].duration = getCurrentTimeUs() - pulseStartTime;
-            pulseCount++;
+   case TX_BIT_SPACE: {
+      irCarrierOff();
+      uint8_t bit = (txData[txByte] >> txBit) & 1;
+      nextTimeUs = bit ? NEC_ONE_SPACE : NEC_ZERO_SPACE;
+
+      txBit++;
+      if (txBit == 8) {
+         txBit = 0;
+         txByte++;
+         if (txByte == 4) {
+            txState = TX_STOP;
+            break;
          }
-         
-         tramaCompleta = true;
-         timeoutReached = true;
       }
-      
-      stopTimeoutTimer();
+      txState = TX_BIT_MARK;
+      break;
    }
+
+   case TX_STOP:
+      irCarrierOn();
+      nextTimeUs = NEC_STOP_MARK;
+      txState = TX_IDLE;
+      txActive = false;
+      break;
+
+   case TX_IDLE:
+   default:
+      irCarrierOff();
+      return;
+   }
+
+   Timer_SetCompareMatch(
+      3,
+      TIMERCOMPAREMATCH0,
+      Timer_microsecondsToTicks(nextTimeUs)
+   );
+}
+void irTxInit(void)
+{
+   gpioConfig(IR_TX_PIN, GPIO_OUTPUT);
+   gpioWrite(IR_TX_PIN, 0);
+
+   Timer_Init(
+      3,
+      Timer_microsecondsToTicks(1000), // dummy inicial
+      irTxCallback
+   );
+}
+void necSend(uint8_t addr, uint8_t cmd)
+{
+   txData[0] = addr;
+   txData[1] = ~addr;
+   txData[2] = cmd;
+   txData[3] = ~cmd;
+
+   txActive = true;
+   txState = TX_HDR_MARK;
+
+   Timer_SetCompareMatch(
+      3,
+      TIMERCOMPAREMATCH0,
+      Timer_microsecondsToTicks(NEC_HDR_MARK)
+   );
 }
 
+// ==== PROGRAMA PRINCIPAL ====
 int main(void) {
    boardConfig();
-   uartConfig(UART_USB, 115200); // Serial USB
-
-   gpioConfig(IR_EMITTER_PIN, GPIO_OUTPUT); // Emisor IR
-   gpioConfig(IR_GPIO_PIN, GPIO_INPUT); // Receptor IR
-
-   // Inicializar sistemas de interrupción
-   initGPIOIrqs();
-   initTimerForTimeout();
+   uartConfig(UART_USB, 115200);
    
-   // Configurar interrupción GPIO para ambos flancos
-   enableGPIOIrq(IR_GPIO_IRQ_CHANNEL, 3, 7, BOTH_EDGES); // GPIO7 = puerto 3, pin 7
-   
-   // Habilitar interrupciones del timer
-   NVIC_EnableIRQ(TIMER1_IRQn);
+   gpioConfig(IR_INPUT_PIN, GPIO_INPUT);
+   timerUsInit();
 
-   printf("Sistema listo. Esperando señal IR...\r\n");
+   // Configurar interrupci?n por flancos en GPIO7 ? P3_7 = GPIO3[7] check
+   enableIrqGPIO(IR_IRQ_CHANNEL, 3, 7);
+   int i;
+   printf("Sistema listo. Esperando se?al IR...\r\n");
 
-   while(true) {
-      // Si se completó una trama
-      if(tramaCompleta) {
-         tramaCompleta = false;
-         printf("Señal IR recibida (%d pulsos)\r\n", pulseCount);
-         printf("Datos de la señal IR...\r\n");
-         for(int i = 0; i < pulseCount; i++) {
-            printf("|%d - %d us|)", pulseBuffer[i].level,pulseBuffer[i].duration);
-         }
-         printf("...\r\n");
-         printf("Reproduciendo señal IR...\r\n");
-         emitirTrama();
-         
-         // Resetear para próxima captura
-         pulseCount = 0;
-         lastLevel = 1;
-         timeoutReached = false;
-      }
-   }
+   resetTimeUs();
+
+   while (true) {
+
+    uint32_t ahora = getTimeUs();
+
+    if (!tramaCompleta &&
+        pulseCount > 3 &&             // NEC siempre tiene m?nimo 4 pulsos
+        (ahora - lastTime) > TIMEOUT_US)
+    {
+        tramaCompleta = true;
+    }
+
+    if (tramaCompleta) {
+
+        printf("\n\nTrama capturada (%d pulsos):\r\n", pulseCount);
+
+        for (i = 0; i < pulseCount; i++) {
+            printf("[%03d] Nivel=%d  Dur=%lu us\r\n",i,pulseBuffer[i].level,(unsigned long)pulseBuffer[i].duration);
+        }
+        uint8_t addr, cmd;
+        bool ok = necDecode(pulseBuffer, pulseCount, &addr, &cmd);
+
+        // reset estado
+        tramaCompleta = false;
+        pulseCount = 0;
+        lastLevel = 1;
+        captureStarted = false;    // Resetear para la proxima trama
+
+        resetTimeUs();
+        lastTime = getTimeUs();    // IMPORTANTE
+       if (ok) {
+            printf("NEC decodificado OK! Addr=0x%02X  Cmd=0x%02X\r\n",addr, cmd);
+            necSend(addr,cmd);
+       } else {
+            printf("ERROR: Trama no v?lida NEC\r\n");
+       }
+    }
 }
 
-// --- Reproducir la señal capturada ---
-void emitirTrama(void) {
-   for(int i = 0; i < pulseCount; i++) {
-      gpioWrite(IR_EMITTER_PIN, pulseBuffer[i].level);
-      delay_us(pulseBuffer[i].duration);
-   }
-   
-   // Limpiar buffer
-   for (int i = 0; i < MAX_PULSES; i++){
-      pulseBuffer[i].level = 0;
-      pulseBuffer[i].duration = 0;
-   }
 
-   // Apagar emisor al terminar
-   gpioWrite(IR_EMITTER_PIN, 0);
-   printf("Emisión finalizada\r\n");
 }
