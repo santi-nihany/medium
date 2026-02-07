@@ -1,0 +1,59 @@
+//===----------------------------------------------------------------------===//
+///
+/// \file
+/// Inicio del programa. Contiene llamados a inicialización y bucle principal.
+///
+//===----------------------------------------------------------------------===//
+
+#include "display.h"
+#include "main.h"
+#include "sprites.h"
+
+#define CS_SCU_PORT 0
+#define CS_SCU_PIN 15
+#define CS_GPIO_PORT 0
+#define CS_GPIO_PIN 15
+
+#define GDO0_SCU_PORT 6
+#define GDO0_SCU_PIN 4
+#define GDO0_GPIO_PORT 3
+#define GDO0_GPIO_PIN 3
+
+int main(void) {
+  // Inicializar placa, puertos y protocolos
+  boardConfig();
+
+  // Inicializar componentes
+
+  // Reconfigurar funcion de pin P2_16 como GPIO para C1101_CS
+  Chip_SCU_PinMuxSet(
+      CS_SCU_PORT, CS_SCU_PIN,
+      (SCU_MODE_INACT |
+       SCU_MODE_FUNC0)); // No pull-up, no pull-down, GPIO function
+  Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, CS_GPIO_PORT,
+                            CS_GPIO_PIN); // Set pin as output
+  Chip_GPIO_SetPinState(LPC_GPIO_PORT, CS_GPIO_PORT, CS_GPIO_PIN,
+                        false); // Set pin low
+
+  Chip_SCU_PinMuxSet(
+      GDO0_SCU_PORT, GDO0_SCU_PIN,
+      (SCU_MODE_INACT |
+       SCU_MODE_FUNC0)); // No pull-up, no pull-down, GPIO function
+  Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, GDO0_GPIO_PORT,
+                            GDO0_GPIO_PIN); // Set pin as output
+  Chip_GPIO_SetPinState(LPC_GPIO_PORT, GDO0_GPIO_PORT, GDO0_GPIO_PIN,
+                        true); // Set pin high
+  while (1) {
+    // if (Chip_GPIO_GetPinState(LPC_GPIO_PORT, CS_GPIO_PORT, CS_GPIO_PIN)) {
+    //   for (int i = 0; i < 4; i++) {
+    //     Chip_GPIO_SetPinToggle(LPC_GPIO_PORT, GDO0_GPIO_PORT, GDO0_GPIO_PIN);
+    //     delay(2500);
+    //   }
+    // }
+    // Chip_GPIO_SetPinToggle(LPC_GPIO_PORT, CS_GPIO_PORT, CS_GPIO_PIN);
+    // delay(2000);
+    delay(10);
+  }
+
+  return 0;
+}

