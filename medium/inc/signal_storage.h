@@ -41,18 +41,12 @@ typedef struct {
 void vStorage_Task(void *pvParameters);
 
 /**
- * @brief Initialize storage module
+ * @brief Enqueue a signal packet for storage
+ * Ownership of packet transfers to storage task on success.
+ * @param packet Signal packet to save (caller must NOT free on success)
  * @return pdPASS on success, pdFAIL otherwise
  */
-BaseType_t Storage_Init(void);
-
-/**
- * @brief Save a signal packet to file
- * @param packet Signal packet to save
- * @param filename Output filename
- * @return pdPASS on success, pdFAIL otherwise
- */
-BaseType_t Storage_SaveSignal(SignalPacket_t *packet, const char *filename);
+BaseType_t Storage_SaveSignal(SignalPacket_t *packet);
 
 /**
  * @brief Load a signal file

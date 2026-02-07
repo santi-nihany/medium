@@ -51,7 +51,7 @@ void vStorageTest_Task(void *pvParameters)
 
     /* Retry until the packet is successfully enqueued (ownership transfers to storage) */
     for (;;) {
-        if (Storage_SaveSignal(packet, "test.sig") == pdPASS) {
+        if (Storage_SaveSignal(packet) == pdPASS) {
             printf("[Test] Enqueued synthetic signal: %lu samples\r\n", (unsigned long)packet->sample_count);
             break;
         }
