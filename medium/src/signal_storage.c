@@ -60,6 +60,7 @@ static BaseType_t MountSD(void)
 
     // Initialize SD card SPI driver (only once)
     if (!spi_initialized) {
+        FSSDC_SetFastClock( 14000000 );  // 14 MHz (default 15 MHz falla)
         FSSDC_InitSPI();
         spi_initialized = pdTRUE;
 

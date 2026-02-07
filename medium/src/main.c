@@ -22,6 +22,7 @@
 #include "timers.h"
 
 #include "sapi.h"
+#include "chip.h"
 
 #include "signal_capture.h"
 #include "signal_storage.h"
@@ -38,6 +39,15 @@
 void diskTickHook(void *ptr);
 void disk_timerproc(void);
 static void vDiskTimerCallback(TimerHandle_t xTimer);
+
+/*==================[SD card CS pin remapping]===============================*/
+
+/* SD card CS: GPIO3[12] on SCU P7_4 (instead of default GPIO3[0] on P6_1)
+ * FSSDC_CS_PORT and FSSDC_CS_PIN are defined in config.mk via DEFINES+= */
+#define SD_CS_SCU_PORT   7
+#define SD_CS_SCU_PIN    4
+#define SD_CS_GPIO_PORT  3
+#define SD_CS_GPIO_PIN   12
 
 /*==================[macros and definitions]=================================*/
 
@@ -105,7 +115,15 @@ static void initHardware(void)
 
     /* SPI configuration for SD card */
     spiConfig(SPI0);
-    
+
+    /* Remap SD card CS to GPIO3[12] (SCU P7_4)
+     * Must be done AFTER spiConfig() which sets up the default GPIO3[0].
+     * FSSDC uses FSSDC_CS_PORT/FSSDC_CS_PIN macros (overridden in config.mk). */
+    Chip_SCU_PinMuxSet(SD_CS_SCU_PORT, SD_CS_SCU_PIN,
+                       (SCU_MODE_PULLUP | SCU_MODE_FUNC0));
+    Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, SD_CS_GPIO_PORT, SD_CS_GPIO_PIN);
+    Chip_GPIO_SetPinOutHigh(LPC_GPIO_PORT, SD_CS_GPIO_PORT, SD_CS_GPIO_PIN);
+
     /* Note: tickConfig/tickCallbackSet don't work with FreeRTOS
      * Disk timing is handled by xDiskTimer software timer instead */
 
