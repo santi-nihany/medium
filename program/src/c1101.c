@@ -2,7 +2,7 @@
 ///
 /// \file c1101.c
 /// Implementación de librería CC1101 para EDU-CIAA con sAPI
-/// Adaptada desde librería Arduino/ESP32
+/// Basada en la librería ELECHOUSE_CC1101_SRC_DRV.h para Arduino/ESP32
 ///
 //===----------------------------------------------------------------------===//
 

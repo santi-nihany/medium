@@ -8,8 +8,10 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-#include "sapi.h"
+#include "c1101.h"
 #include "chip.h"
+#include "sapi.h"
+#include "shield.h"
 #include <stdlib.h>
 #include <string.h>
 
