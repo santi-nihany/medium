@@ -10,6 +10,8 @@
 
 #include "c1101.h"
 #include "chip.h"
+#include "ff.h"
+#include "fssdc.h"
 #include "sapi.h"
 #include "shield.h"
 #include <stdlib.h>

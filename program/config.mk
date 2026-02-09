@@ -8,3 +8,13 @@ USE_FPU=y
 # Libraries
 USE_LPCOPEN=y
 USE_SAPI=y
+
+# USE_FREERTOS=y
+# FREERTOS_HEAP_TYPE=4
+
+# FatFS for SD card
+USE_FATFS=y
+ 
+# SD card CS pin remapping: GPIO3[12] on SCU P7_4 (default is GPIO3[0] on P6_1)
+DEFINES+=FSSDC_CS_PORT=3
+DEFINES+=FSSDC_CS_PIN=12
