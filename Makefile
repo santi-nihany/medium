@@ -293,7 +293,7 @@ else
 	@echo DOWNLOAD to M0 FLASH
 	$(Q)$(OOCD) -f $(OOCD_SCRIPT) \
 		-c "init" \
-		-c "halt 0" \
+		-c "reset halt" \
 		-c "flash write_image erase $< 0x1B000000 bin" \
 		-c "reset run" \
 		-c "shutdown" 2>&1
@@ -304,7 +304,7 @@ endif
 	@echo DOWNLOAD to FLASH
 	$(Q)$(OOCD) -f $(OOCD_SCRIPT) \
 		-c "init" \
-		-c "halt 0" \
+		-c "reset halt" \
 		-c "flash write_image erase $< 0x1A000000 bin" \
 		-c "reset run" \
 		-c "shutdown" 2>&1
@@ -314,7 +314,7 @@ endif
 	@echo DOWNLOAD to RAM
 	$(Q)$(OOCD) -f $(OOCD_SCRIPT) \
 			 -c "init" \
-			 -c "halt 0" \
+			 -c "reset halt" \
 			 -c "load_image $< 0x20000000 bin" \
 			 -c "reset run" \
 			 -c "shutdown" 2>&1
