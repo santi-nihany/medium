@@ -76,7 +76,7 @@ void vMyTask(void *pvParameters)
 ## FatFS Integration
 - **IMPORTANT**: `tickCallbackSet()` does NOT work with FreeRTOS!
 - Use `xDiskTimer` (FreeRTOS software timer, 10ms) to call `disk_timerproc()`
-- Use `xStorageMutex` for exclusive SD access
+- Use `xSPIMutex` for exclusive SD access
 - Wait 500ms after `FSSDC_InitSPI()` before mounting (let timer stabilize card)
 - File path format: `SDC:/signals/signal_IR_000001.sig`
 - File format: ASCII header + binary samples
@@ -84,7 +84,7 @@ void vMyTask(void *pvParameters)
 ## Common Pitfalls to Avoid
 1. Don't use `xTaskGetTickCountFromISR()` in task context - use `xTaskGetTickCount()`
 2. Don't forget to `vPortFree()` received queue packets
-3. Don't access SD without taking `xStorageMutex`
+3. Don't access SD without taking `xSPIMutex`
 4. Don't use `printf` in time-critical ISRs
 5. Empty `for(;;)` loops without blocking will starve other tasks
 

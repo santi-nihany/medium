@@ -9,6 +9,7 @@
  */
 
 #include "signal_storage.h"
+#include "rf_capture.h"
 
 /* Standard C */
 #include <stdio.h>
@@ -39,7 +40,7 @@ static BaseType_t sd_mounted = pdFALSE;
 /*==================[external data]==========================================*/
 
 extern QueueHandle_t xStorageQueue;
-extern SemaphoreHandle_t xStorageMutex;
+extern SemaphoreHandle_t xSPIMutex;
 
 /*==================[internal functions]=====================================*/
 
@@ -171,7 +172,7 @@ void vStorage_Task(void *pvParameters)
         }
 
         /* Take mutex for exclusive SD access */
-        if (xSemaphoreTake(xStorageMutex, pdMS_TO_TICKS(5000)) != pdPASS) {
+        if (xSemaphoreTake(xSPIMutex, pdMS_TO_TICKS(5000)) != pdPASS) {
             printf("[Storage] ERROR: Cannot take mutex (timeout)\r\n");
             vPortFree(packet);
             printf("[Storage] Heap: %lu bytes\r\n",
@@ -183,7 +184,7 @@ void vStorage_Task(void *pvParameters)
         /* Generate filename */
         if (GenerateFilename(filename, packet->mode) != pdPASS) {
             printf("[Storage] ERROR: Cannot generate filename\r\n");
-            xSemaphoreGive(xStorageMutex);
+            xSemaphoreGive(xSPIMutex);
             vPortFree(packet);
             continue;
         }
@@ -194,47 +195,83 @@ void vStorage_Task(void *pvParameters)
         fr = f_open(&fil, filename, FA_WRITE | FA_CREATE_ALWAYS);
         if (fr != FR_OK) {
             printf("[Storage] ERROR: Cannot open file (FRESULT=%d)\r\n", fr);
-            xSemaphoreGive(xStorageMutex);
+            xSemaphoreGive(xSPIMutex);
             vPortFree(packet);
             continue;
         }
 
-        /* Write ASCII header */
-        char header[80];
-        int header_len = sprintf(header,
-            "MED1;VER1;TS=%lu;MODE=%d;SAMPLES=%lu\r\n",
-            (unsigned long)packet->timestamp_ms,
-            packet->mode,
-            (unsigned long)packet->sample_count);
-
+        /* Write header and data — format depends on signal mode */
         total_bytes = 0;
-        fr = f_write(&fil, header, header_len, &bytes_written);
 
-        /* Verify header bytes written (reference: fatfs_log_time_stamp pattern) */
-        if (fr != FR_OK || bytes_written != (UINT)header_len) {
-            printf("[Storage] ERROR: Header write failed (fr=%d, wrote %u/%d)\r\n",
-                   fr, (unsigned)bytes_written, header_len);
-            f_close(&fil);
-            xSemaphoreGive(xStorageMutex);
-            vPortFree(packet);
-            continue;
+        if (packet->mode == SIGNAL_MODE_RF) {
+            /* RF header: CC1101_CAPTURE format with config metadata */
+            char header[200];
+            int header_len = sprintf(header,
+                "CC1101_CAPTURE;VER1\r\n"
+                "FREQ_MHZ=%.2f\r\n"
+                "MODULATION=%d\r\n"
+                "BANDWIDTH_KHZ=%.2f\r\n"
+                "DELAY_US=%lu\r\n"
+                "DATA_LENGTH=%lu\r\n"
+                "---DATA_START---\r\n",
+                (double)xCurrentRFConfig.freq_mhz,
+                (int)xCurrentRFConfig.modulation_mode,
+                (double)xCurrentRFConfig.bandwidth_khz,
+                (unsigned long)xCurrentRFConfig.delay_us,
+                (unsigned long)packet->sample_count);
+
+            fr = f_write(&fil, header, header_len, &bytes_written);
+            if (fr != FR_OK || bytes_written != (UINT)header_len) {
+                printf("[Storage] ERROR: RF header write failed (fr=%d)\r\n", fr);
+                f_close(&fil);
+                xSemaphoreGive(xSPIMutex);
+                vPortFree(packet);
+                continue;
+            }
+            total_bytes += bytes_written;
+
+            /* RF data: raw bytes (1 byte per sample) */
+            UINT data_size = packet->sample_count;
+            fr = f_write(&fil, packet->data, data_size, &bytes_written);
+            if (fr != FR_OK || bytes_written != data_size) {
+                printf("[Storage] ERROR: RF data write failed (fr=%d)\r\n", fr);
+                f_close(&fil);
+                xSemaphoreGive(xSPIMutex);
+                vPortFree(packet);
+                continue;
+            }
+            total_bytes += bytes_written;
+        } else {
+            /* IR header: MED1;VER1 format */
+            char header[80];
+            int header_len = sprintf(header,
+                "MED1;VER1;TS=%lu;MODE=%d;SAMPLES=%lu\r\n",
+                (unsigned long)packet->timestamp_ms,
+                packet->mode,
+                (unsigned long)packet->sample_count);
+
+            fr = f_write(&fil, header, header_len, &bytes_written);
+            if (fr != FR_OK || bytes_written != (UINT)header_len) {
+                printf("[Storage] ERROR: IR header write failed (fr=%d)\r\n", fr);
+                f_close(&fil);
+                xSemaphoreGive(xSPIMutex);
+                vPortFree(packet);
+                continue;
+            }
+            total_bytes += bytes_written;
+
+            /* IR data: uint32_t samples */
+            UINT data_size = packet->sample_count * sizeof(uint32_t);
+            fr = f_write(&fil, packet->data, data_size, &bytes_written);
+            if (fr != FR_OK || bytes_written != data_size) {
+                printf("[Storage] ERROR: IR data write failed (fr=%d)\r\n", fr);
+                f_close(&fil);
+                xSemaphoreGive(xSPIMutex);
+                vPortFree(packet);
+                continue;
+            }
+            total_bytes += bytes_written;
         }
-        total_bytes += bytes_written;
-
-        /* Write binary sample data */
-        UINT data_size = packet->sample_count * sizeof(uint32_t);
-        fr = f_write(&fil, packet->data, data_size, &bytes_written);
-
-        /* Verify data bytes written */
-        if (fr != FR_OK || bytes_written != data_size) {
-            printf("[Storage] ERROR: Data write failed (fr=%d, wrote %u/%u)\r\n",
-                   fr, (unsigned)bytes_written, (unsigned)data_size);
-            f_close(&fil);
-            xSemaphoreGive(xStorageMutex);
-            vPortFree(packet);
-            continue;
-        }
-        total_bytes += bytes_written;
 
         /* Close file */
         f_close(&fil);
@@ -247,7 +284,7 @@ void vStorage_Task(void *pvParameters)
                (unsigned long)MAX_TEST_PACKETS);
 
         /* Release mutex */
-        xSemaphoreGive(xStorageMutex);
+        xSemaphoreGive(xSPIMutex);
 
         /* Free packet memory */
         vPortFree(packet);
@@ -295,7 +332,7 @@ BaseType_t Storage_DeleteSignal(const char *filename)
         return pdFAIL;
     }
 
-    if (xSemaphoreTake(xStorageMutex, pdMS_TO_TICKS(5000)) != pdPASS) {
+    if (xSemaphoreTake(xSPIMutex, pdMS_TO_TICKS(5000)) != pdPASS) {
         printf("[Storage] ERROR: Cannot take mutex for delete\r\n");
         return pdFAIL;
     }
@@ -308,7 +345,7 @@ BaseType_t Storage_DeleteSignal(const char *filename)
         printf("[Storage] ERROR: Cannot delete file (FRESULT=%d)\r\n", fr);
     }
 
-    xSemaphoreGive(xStorageMutex);
+    xSemaphoreGive(xSPIMutex);
     return result;
 }
 
@@ -328,7 +365,7 @@ uint32_t Storage_ListFiles(SignalFileInfo_t *file_list, uint32_t max_count)
         return 0;
     }
 
-    if (xSemaphoreTake(xStorageMutex, pdMS_TO_TICKS(5000)) != pdPASS) {
+    if (xSemaphoreTake(xSPIMutex, pdMS_TO_TICKS(5000)) != pdPASS) {
         printf("[Storage] ERROR: Cannot take mutex for list\r\n");
         return 0;
     }
@@ -336,7 +373,7 @@ uint32_t Storage_ListFiles(SignalFileInfo_t *file_list, uint32_t max_count)
     fr = f_opendir(&dir, SIGNAL_DIR);
     if (fr != FR_OK) {
         printf("[Storage] ERROR: Cannot open directory (FRESULT=%d)\r\n", fr);
-        xSemaphoreGive(xStorageMutex);
+        xSemaphoreGive(xSPIMutex);
         return 0;
     }
 
@@ -355,7 +392,7 @@ uint32_t Storage_ListFiles(SignalFileInfo_t *file_list, uint32_t max_count)
     }
 
     f_closedir(&dir);
-    xSemaphoreGive(xStorageMutex);
+    xSemaphoreGive(xSPIMutex);
 
     return count;
 }
@@ -374,13 +411,13 @@ BaseType_t Storage_GetStats(uint32_t *free_space, uint32_t *total_space)
         return pdFAIL;
     }
 
-    if (xSemaphoreTake(xStorageMutex, pdMS_TO_TICKS(5000)) != pdPASS) {
+    if (xSemaphoreTake(xSPIMutex, pdMS_TO_TICKS(5000)) != pdPASS) {
         return pdFAIL;
     }
 
     fr = f_getfree("SDC:", &fre_clust, &fs_ptr);
     if (fr != FR_OK) {
-        xSemaphoreGive(xStorageMutex);
+        xSemaphoreGive(xSPIMutex);
         return pdFAIL;
     }
 
@@ -390,6 +427,6 @@ BaseType_t Storage_GetStats(uint32_t *free_space, uint32_t *total_space)
     *total_space = tot_sect * 512;
     *free_space = fre_sect * 512;
 
-    xSemaphoreGive(xStorageMutex);
+    xSemaphoreGive(xSPIMutex);
     return pdPASS;
 }

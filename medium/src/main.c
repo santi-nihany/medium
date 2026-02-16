@@ -1,9 +1,9 @@
 /**
  * @file main.c
  * @brief Main entry point for Médium Device firmware
- * 
+ *
  * Proyecto Médium: Captura, almacenamiento y reproducción de señales IR/RF
- * 
+ *
  * Arquitectura:
  * - Event-Driven / Time-Driven híbrida sobre RTOS preemptivo
  * - Interrupciones HW capturan señales IR/RF mediante StreamBuffers
@@ -31,6 +31,12 @@
 #include "housekeeping.h"
 #include "test_storage.h"
 #include "mock_signal_generator.h"
+
+/* Module includes */
+#include "cc1101.h"
+#include "rf_capture.h"
+#include "ir_module.h"
+#include "sh1106.h"
 
 /* FatFS includes for disk timer */
 #include "ff.h"
@@ -82,15 +88,15 @@ StreamBufferHandle_t xStreamBufferIR = NULL;
 StreamBufferHandle_t xStreamBufferRF = NULL;
 QueueHandle_t xStorageQueue = NULL;
 QueueHandle_t xUICommandQueue = NULL;
-SemaphoreHandle_t xStorageMutex = NULL;
+SemaphoreHandle_t xSPIMutex = NULL;
 TimerHandle_t xDiskTimer = NULL;
 
-/* Task handles */
-static TaskHandle_t xTaskSignalCaptureIR = NULL;
-static TaskHandle_t xTaskSignalCaptureRF = NULL;
-static TaskHandle_t xTaskStorage = NULL;
-static TaskHandle_t xTaskReplay = NULL;
-static TaskHandle_t xTaskUI = NULL;
+/* Task handles — non-static so UI controller can send notifications */
+TaskHandle_t xTaskSignalCaptureIR = NULL;
+TaskHandle_t xTaskSignalCaptureRF = NULL;
+TaskHandle_t xTaskStorage = NULL;
+TaskHandle_t xTaskReplay = NULL;
+TaskHandle_t xTaskUI = NULL;
 static TaskHandle_t xTaskHousekeeping = NULL;
 static TaskHandle_t xTaskTestStorage = NULL;
 static TaskHandle_t xTaskMockGenerator = NULL;
@@ -108,12 +114,12 @@ static void initHardware(void)
 {
     /* Initialize board and basic peripherals */
     boardConfig();
-    
+
     /* Initialize UART for debugging */
     uartConfig(UART_USB, 115200);
     printf("\r\n=== Médium Device Firmware ===\r\n");
 
-    /* SPI configuration for SD card */
+    /* SPI configuration for SD card and CC1101 (shared SPI0 bus) */
     spiConfig(SPI0);
 
     /* Remap SD card CS to GPIO3[12] (SCU P7_4)
@@ -124,16 +130,35 @@ static void initHardware(void)
     Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, SD_CS_GPIO_PORT, SD_CS_GPIO_PIN);
     Chip_GPIO_SetPinOutHigh(LPC_GPIO_PORT, SD_CS_GPIO_PORT, SD_CS_GPIO_PIN);
 
-    /* Note: tickConfig/tickCallbackSet don't work with FreeRTOS
-     * Disk timing is handled by xDiskTimer software timer instead */
+    /* === CC1101 RF transceiver init ===
+     * Must be AFTER spiConfig(SPI0) and SD CS remap.
+     * cc1101_initGPIO() reclaims P6_1 (GPIO3[0]) for GDO2 input. */
+    cc1101_initGPIO();
+    printf("[RF] CC1101 GPIO initialized\r\n");
 
-    /* TODO: Initialize IR receiver/transmitter */
-    /* TODO: Initialize RF receiver/transmitter */
-    /* TODO: Initialize LCD display */
-    /* TODO: Initialize GPIO for buttons */
-    /* TODO: Initialize Timer Capture for IR/RF */
-    /* TODO: Initialize RTC for timestamps */
-    
+    /* Detect and configure CC1101 */
+    cc1101_init();
+    if (cc1101_detect()) {
+        uint8_t version = cc1101_readStatus(CC1101_VERSION);
+        printf("[RF] CC1101 detected (version=0x%02X)\r\n", version);
+        rf_setup();
+        printf("[RF] CC1101 configured for async RX\r\n");
+    } else {
+        printf("[RF] WARNING: CC1101 not detected!\r\n");
+    }
+
+    /* === IR module init ===
+     * Configures GPIO7 (IR RX) as input, GPIO5 (IR TX) as output,
+     * TIMER2 as free-running µs counter */
+    ir_init();
+    printf("[IR] IR module initialized\r\n");
+
+    /* === SH1106 OLED display init ===
+     * I2C0 at 100kHz, then SH1106 init sequence */
+    i2cInit(I2C0, 100000);
+    sh1106_init();
+    printf("[UI] SH1106 OLED display initialized\r\n");
+
     printf("Hardware initialized.\r\n");
 }
 
@@ -145,30 +170,30 @@ static void initRTOSPrimitives(void)
     /* Create StreamBuffers for signal capture */
     xStreamBufferIR = xStreamBufferCreate(STREAM_BUFFER_SIZE, sizeof(uint32_t));
     xStreamBufferRF = xStreamBufferCreate(STREAM_BUFFER_SIZE, sizeof(uint32_t));
-    
+
     if (xStreamBufferIR == NULL || xStreamBufferRF == NULL) {
         printf("ERROR: Failed to create StreamBuffers!\r\n");
         while (1);
     }
-    
+
     /* Create Storage Queue */
     xStorageQueue = xQueueCreate(STORAGE_QUEUE_SIZE, sizeof(SignalPacket_t*));
     if (xStorageQueue == NULL) {
         printf("ERROR: Failed to create Storage Queue!\r\n");
         while (1);
     }
-    
+
     /* Create UI Command Queue */
     xUICommandQueue = xQueueCreate(UI_COMMAND_QUEUE_SIZE, sizeof(UICommand_t));
     if (xUICommandQueue == NULL) {
         printf("ERROR: Failed to create UI Command Queue!\r\n");
         while (1);
     }
-    
-    /* Create Storage Mutex (only one task can write to SD) */
-    xStorageMutex = xSemaphoreCreateMutex();
-    if (xStorageMutex == NULL) {
-        printf("ERROR: Failed to create Storage Mutex!\r\n");
+
+    /* Create SPI Mutex (serializes ALL SPI0 access: SD + CC1101) */
+    xSPIMutex = xSemaphoreCreateMutex();
+    if (xSPIMutex == NULL) {
+        printf("ERROR: Failed to create SPI Mutex!\r\n");
         while (1);
     }
 
@@ -208,7 +233,7 @@ static void createTasks(void)
         PRIORITY_SIGNAL_CAPTURE_IR,
         &xTaskSignalCaptureIR
     );
-    
+
     xTaskCreate(
         vSignalCaptureRF_Task,
         "SignalCaptureRF",
@@ -217,7 +242,7 @@ static void createTasks(void)
         PRIORITY_SIGNAL_CAPTURE_RF,
         &xTaskSignalCaptureRF
     );
-    
+
     /* Create Storage Task */
     xTaskCreate(
         vStorage_Task,
@@ -227,7 +252,7 @@ static void createTasks(void)
         PRIORITY_STORAGE_TASK,
         &xTaskStorage
     );
-    
+
     /* Create Replay Task */
     xTaskCreate(
         vReplay_Task,
@@ -237,7 +262,7 @@ static void createTasks(void)
         PRIORITY_REPLAY_TASK,
         &xTaskReplay
     );
-    
+
     /* Create UI Task */
     xTaskCreate(
         vUI_Task,
@@ -247,7 +272,7 @@ static void createTasks(void)
         PRIORITY_UI_TASK,
         &xTaskUI
     );
-    
+
     /* Create Housekeeping Task */
     xTaskCreate(
         vHousekeeping_Task,
@@ -288,14 +313,27 @@ static void createTasks(void)
  */
 static void initInterrupts(void)
 {
-    /* TODO: Configure IR interrupt on edge detection */
-    /* TODO: Configure RF interrupt on edge detection */
-    /* TODO: Configure button interrupts */
-    /* TODO: Configure timer capture interrupts */
-    
+    /* === IR RX interrupt (PININT channel 0, both edges on GPIO7) ===
+     * GPIO7 = sAPI alias. Actual pin determined by sAPI internals.
+     * We configure PIN_INT0 for both-edge detection. */
+
+    /* Map GPIO interrupt source to PININT channel 0 */
+    Chip_SCU_GPIOIntPinSel(0, IR_RX_GPIO_PORT, IR_RX_GPIO_PIN);
+
+    /* Configure for both-edge sensitivity */
+    Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(0));
+    Chip_PININT_SetPinModeEdge(LPC_GPIO_PIN_INT, PININTCH(0));
+    Chip_PININT_EnableIntLow(LPC_GPIO_PIN_INT, PININTCH(0));
+    Chip_PININT_EnableIntHigh(LPC_GPIO_PIN_INT, PININTCH(0));
+
+    /* Set NVIC priority safe for FreeRTOS API calls */
+    NVIC_SetPriority(PIN_INT0_IRQn, configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY);
+    NVIC_ClearPendingIRQ(PIN_INT0_IRQn);
+    NVIC_EnableIRQ(PIN_INT0_IRQn);
+
     /* Enable interrupts */
     __enable_irq();
-    
+
     printf("Interrupts configured.\r\n");
 }
 
@@ -306,24 +344,24 @@ int main(void)
 {
     /* Initialize hardware */
     initHardware();
-    
+
     /* Initialize RTOS primitives */
     initRTOSPrimitives();
-    
+
     /* Create tasks */
     createTasks();
-    
+
     /* Configure interrupts */
     initInterrupts();
-    
+
     /* Start the scheduler */
     printf("Starting FreeRTOS scheduler...\r\n");
     vTaskStartScheduler();
-    
+
     /* Should never reach here */
     printf("ERROR: Scheduler exited!\r\n");
     while (1);
-    
+
     return 0;
 }
 
@@ -348,4 +386,3 @@ void diskTickHook(void *ptr)
 }
 
 /*==================[end of file]============================================*/
-

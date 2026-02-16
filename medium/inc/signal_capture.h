@@ -38,6 +38,11 @@ typedef struct {
     uint8_t data[];          /* Variable length data */
 } SignalPacket_t;
 
+/*==================[RF capture config]=====================================*/
+
+/* Forward reference — full definition in rf_capture.h */
+#include "rf_capture.h"
+
 /*==================[external functions]=====================================*/
 
 /**
