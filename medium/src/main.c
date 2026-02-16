@@ -35,6 +35,7 @@
 #include "rf_capture.h"
 #include "modulo_ir.h"
 #include "sh1106.h"
+#include "buttons.h"
 
 /* FatFS includes for disk timer */
 #include "ff.h"
@@ -136,6 +137,12 @@ static void initHardware(void)
      * TIMER2 as free-running us counter */
     modulo_ir_init();
     printf("[IR] IR module initialized\r\n");
+
+    /* === ADC + Buttons/Joystick init ===
+     * ADC for joystick analog axes, GPIO for ENTER/BACK buttons */
+    adcConfig(ADC_ENABLE);
+    buttonsInit();
+    printf("[UI] Buttons and joystick initialized\r\n");
 
     /* === SH1106 OLED display init ===
      * I2C0 at 100kHz, then SH1106 init sequence */

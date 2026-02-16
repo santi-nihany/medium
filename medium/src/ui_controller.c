@@ -8,7 +8,7 @@
  * - Finalizado (Guardar/Descartar)
  * - Archivos (file list, Reproducir, Borrar)
  *
- * Buttons: TEC1=UP, TEC2=DOWN, TEC3=ACCEPT, TEC4=BACK
+ * Input: Joystick Y-axis=UP/DOWN, SW_ENTER=ACCEPT, SW_BACK=BACK
  * Display: SH1106 128x64 OLED via I2C0
  */
 
@@ -18,6 +18,7 @@
 #include "signal_storage.h"
 #include "sh1106.h"
 #include "sprites.h"
+#include "buttons.h"
 #include "main.h"
 #include "sapi.h"
 #include <stdio.h>
@@ -52,11 +53,10 @@ static SignalFileInfo_t file_list[UI_MAX_FILES];
 static uint32_t file_count = 0;
 static uint8_t file_scroll = 0;     /* Top visible file index */
 
-/* Button previous states (for edge detection) */
-static bool_t prev_tec1 = TRUE;     /* TRUE = released (active low) */
-static bool_t prev_tec2 = TRUE;
-static bool_t prev_tec3 = TRUE;
-static bool_t prev_tec4 = TRUE;
+/* Previous input states (for edge detection) */
+static bool_t prev_enter = FALSE;   /* swEnterRead returns TRUE when pressed */
+static bool_t prev_back = FALSE;
+static int8_t prev_joy_y = 0;       /* Joystick Y: -1=up, 0=center, 1=down */
 
 /* Capture mode tracking (which mode was started) */
 static uint8_t capture_mode = SIGNAL_MODE_IR;
@@ -219,27 +219,35 @@ static void DrawError(const char *msg)
 }
 
 /**
- * @brief Poll buttons and return detected event (edge detection with debounce)
+ * @brief Poll joystick + buttons, return detected event (edge detection)
+ *
+ * Joystick Y-axis: -1 = UP, +1 = DOWN (edge: center→direction)
+ * SW_ENTER: rising edge = ACCEPT
+ * SW_BACK: rising edge = BACK
  */
 static UIEvent_t PollButtons(void)
 {
-    bool_t tec1 = gpioRead(TEC1);
-    bool_t tec2 = gpioRead(TEC2);
-    bool_t tec3 = gpioRead(TEC3);
-    bool_t tec4 = gpioRead(TEC4);
-
     UIEvent_t event = UI_EVENT_NONE;
 
-    /* Detect falling edge (button press, active low) */
-    if (prev_tec1 && !tec1) event = UI_EVENT_UP;
-    if (prev_tec2 && !tec2) event = UI_EVENT_DOWN;
-    if (prev_tec3 && !tec3) event = UI_EVENT_ACCEPT;
-    if (prev_tec4 && !tec4) event = UI_EVENT_BACK;
+    /* Read joystick */
+    JoystickState joy = joystickRead();
 
-    prev_tec1 = tec1;
-    prev_tec2 = tec2;
-    prev_tec3 = tec3;
-    prev_tec4 = tec4;
+    /* Joystick Y-axis edge detection: trigger on center→direction transition */
+    if (joy.y != prev_joy_y) {
+        if (joy.y == -1) event = UI_EVENT_UP;
+        if (joy.y == 1)  event = UI_EVENT_DOWN;
+        prev_joy_y = joy.y;
+    }
+
+    /* Digital buttons: edge detection (trigger on FALSE→TRUE transition) */
+    bool_t enter = swEnterRead();
+    bool_t back = swBackRead();
+
+    if (enter && !prev_enter) event = UI_EVENT_ACCEPT;
+    if (back && !prev_back)   event = UI_EVENT_BACK;
+
+    prev_enter = enter;
+    prev_back = back;
 
     return event;
 }

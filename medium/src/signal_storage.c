@@ -14,6 +14,7 @@
 /* Standard C */
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* FatFS includes */
 #include "ff.h"
@@ -133,9 +134,6 @@ void vStorage_Task(void *pvParameters)
     uint32_t total_bytes;
     static uint32_t packets_saved = 0;
 
-    /* Limit packets for testing - set to 0 for unlimited */
-    const uint32_t MAX_TEST_PACKETS = 5;
-
     printf("[Storage] Storage Task started (SD write enabled)\r\n");
 
     /* Mount SD card */
@@ -145,14 +143,6 @@ void vStorage_Task(void *pvParameters)
 
     for (;;) {
         if (xQueueReceive(xStorageQueue, &packet, portMAX_DELAY) != pdPASS) {
-            continue;
-        }
-
-        /* Check test limit */
-        if (MAX_TEST_PACKETS > 0 && packets_saved >= MAX_TEST_PACKETS) {
-            printf("[Storage] Test limit reached (%lu packets), discarding\r\n",
-                   (unsigned long)MAX_TEST_PACKETS);
-            vPortFree(packet);
             continue;
         }
 
@@ -277,11 +267,8 @@ void vStorage_Task(void *pvParameters)
         f_close(&fil);
 
         packets_saved++;
-        printf("[Storage] SUCCESS: Wrote %lu bytes\r\n",
-               (unsigned long)total_bytes);
-        printf("[Storage] Files saved: %lu/%lu\r\n",
-               (unsigned long)packets_saved,
-               (unsigned long)MAX_TEST_PACKETS);
+        printf("[Storage] SUCCESS: Wrote %lu bytes (total saved: %lu)\r\n",
+               (unsigned long)total_bytes, (unsigned long)packets_saved);
 
         /* Release mutex */
         xSemaphoreGive(xSPIMutex);
@@ -311,11 +298,114 @@ BaseType_t Storage_SaveSignal(SignalPacket_t *packet)
 
 BaseType_t Storage_LoadSignal(const char *filename, SignalPacket_t **packet)
 {
-    /* TODO: Implement header parsing + data read */
-    (void)filename;
-    (void)packet;
-    printf("[Storage] ERROR: Storage_LoadSignal not implemented\r\n");
-    return pdFAIL;
+    FRESULT fr;
+    UINT bytes_read;
+    char filepath[64];
+    char header_buf[128];
+
+    if (filename == NULL || packet == NULL) {
+        return pdFAIL;
+    }
+
+    if (!sd_mounted) {
+        printf("[Storage] ERROR: Cannot load, SD not mounted\r\n");
+        return pdFAIL;
+    }
+
+    /* Build full path: SIGNAL_DIR/filename */
+    snprintf(filepath, sizeof(filepath), "%s/%s", SIGNAL_DIR, filename);
+
+    if (xSemaphoreTake(xSPIMutex, pdMS_TO_TICKS(5000)) != pdPASS) {
+        printf("[Storage] ERROR: Cannot take mutex for load\r\n");
+        return pdFAIL;
+    }
+
+    fr = f_open(&fil, filepath, FA_READ);
+    if (fr != FR_OK) {
+        printf("[Storage] ERROR: Cannot open %s (FRESULT=%d)\r\n", filepath, fr);
+        xSemaphoreGive(xSPIMutex);
+        return pdFAIL;
+    }
+
+    /* Read header line (ASCII, terminated by \n) */
+    UINT i = 0;
+    uint8_t ch;
+    while (i < sizeof(header_buf) - 1) {
+        fr = f_read(&fil, &ch, 1, &bytes_read);
+        if (fr != FR_OK || bytes_read == 0) break;
+        header_buf[i++] = (char)ch;
+        if (ch == '\n') break;
+    }
+    header_buf[i] = '\0';
+
+    /* Parse header: MED1;VER1;TS=<ts>;MODE=<m>;SAMPLES=<n>\r\n */
+    uint32_t ts = 0;
+    int mode = 0;
+    uint32_t sample_count = 0;
+
+    if (strncmp(header_buf, "MED1;VER1;", 10) != 0) {
+        printf("[Storage] ERROR: Unknown header format: %.20s...\r\n", header_buf);
+        f_close(&fil);
+        xSemaphoreGive(xSPIMutex);
+        return pdFAIL;
+    }
+
+    /* Parse fields from header */
+    char *p = header_buf + 10;  /* skip "MED1;VER1;" */
+    char *token;
+
+    token = strstr(p, "TS=");
+    if (token) ts = strtoul(token + 3, NULL, 10);
+
+    token = strstr(p, "MODE=");
+    if (token) mode = atoi(token + 5);
+
+    token = strstr(p, "SAMPLES=");
+    if (token) sample_count = strtoul(token + 8, NULL, 10);
+
+    if (sample_count == 0 || sample_count > 1024) {
+        printf("[Storage] ERROR: Invalid sample count: %lu\r\n",
+               (unsigned long)sample_count);
+        f_close(&fil);
+        xSemaphoreGive(xSPIMutex);
+        return pdFAIL;
+    }
+
+    printf("[Storage] Loading: mode=%d, samples=%lu, ts=%lu\r\n",
+           mode, (unsigned long)sample_count, (unsigned long)ts);
+
+    /* Allocate packet */
+    size_t data_size = sample_count * sizeof(uint32_t);
+    SignalPacket_t *pkt = pvPortMalloc(sizeof(SignalPacket_t) + data_size);
+    if (pkt == NULL) {
+        printf("[Storage] ERROR: Failed to allocate packet for load\r\n");
+        f_close(&fil);
+        xSemaphoreGive(xSPIMutex);
+        return pdFAIL;
+    }
+
+    pkt->mode = (uint8_t)mode;
+    pkt->timestamp_ms = ts;
+    pkt->sample_count = sample_count;
+
+    /* Read binary sample data */
+    fr = f_read(&fil, pkt->data, data_size, &bytes_read);
+    if (fr != FR_OK || bytes_read != data_size) {
+        printf("[Storage] ERROR: Data read failed (fr=%d, read=%u, expected=%u)\r\n",
+               fr, (unsigned)bytes_read, (unsigned)data_size);
+        vPortFree(pkt);
+        f_close(&fil);
+        xSemaphoreGive(xSPIMutex);
+        return pdFAIL;
+    }
+
+    f_close(&fil);
+    xSemaphoreGive(xSPIMutex);
+
+    *packet = pkt;
+    printf("[Storage] Loaded %s: %lu samples, %lu bytes\r\n",
+           filename, (unsigned long)sample_count, (unsigned long)data_size);
+    return pdPASS;
 }
 
 BaseType_t Storage_DeleteSignal(const char *filename)

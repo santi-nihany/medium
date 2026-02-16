@@ -7,6 +7,7 @@
  */
 
 #include "signal_capture.h"
+#include "ui_controller.h"
 #include "modulo_ir.h"
 #include "rf_capture.h"
 #include "cc1101.h"
@@ -22,6 +23,7 @@ static volatile BaseType_t xRFCaptureActive = pdFALSE;
 /*==================[external data]==========================================*/
 
 extern QueueHandle_t xStorageQueue;
+extern QueueHandle_t xUICommandQueue;
 extern SemaphoreHandle_t xSPIMutex;
 
 /*==================[external functions]=====================================*/
@@ -87,6 +89,16 @@ void vSignalCaptureIR_Task(void *pvParameters)
         }
 
         xIRCaptureActive = pdFALSE;
+
+        /* Notify UI of capture result */
+        UICommand_t ui_cmd;
+        ui_cmd.param = 0;
+        if (captured && count > 0) {
+            ui_cmd.event = UI_EVENT_CAPTURE_SUCCESS;
+        } else {
+            ui_cmd.event = UI_EVENT_CAPTURE_ERROR;
+        }
+        xQueueSend(xUICommandQueue, &ui_cmd, pdMS_TO_TICKS(100));
     }
 }
 
@@ -168,6 +180,16 @@ void vSignalCaptureRF_Task(void *pvParameters)
         }
 
         xRFCaptureActive = pdFALSE;
+
+        /* Notify UI of capture result */
+        UICommand_t ui_cmd;
+        ui_cmd.param = 0;
+        if (captured) {
+            ui_cmd.event = UI_EVENT_CAPTURE_SUCCESS;
+        } else {
+            ui_cmd.event = UI_EVENT_CAPTURE_ERROR;
+        }
+        xQueueSend(xUICommandQueue, &ui_cmd, pdMS_TO_TICKS(100));
     }
 }
 

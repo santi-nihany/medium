@@ -1,9 +1,9 @@
 /**
  * @file signal_replay.h
- * @brief Signal replay module for reproducing captured signals
- * 
- * This module handles loading signal files and replaying them with
- * precise timing using hardware timers and DMA.
+ * @brief Signal replay module for reproducing captured IR signals
+ *
+ * Loads signal files from SD via Storage_LoadSignal(), decodes NEC
+ * protocol, and replays via modulo_ir_send_nec().
  */
 
 #ifndef _SIGNAL_REPLAY_H_
@@ -13,10 +13,6 @@
 #include "FreeRTOSConfig.h"
 #include "task.h"
 #include "signal_capture.h"
-
-/*==================[macros and definitions]=================================*/
-
-#define REPLAY_BUFFER_SIZE   2048
 
 /*==================[types]==================================================*/
 
@@ -32,20 +28,20 @@ typedef enum {
 
 /**
  * @brief Replay Task
- * Handles signal replay with precise timing
+ * Blocks on task notification, loads signal from SD, decodes NEC, and sends
  * @param pvParameters Task parameters (unused)
  */
 void vReplay_Task(void *pvParameters);
 
 /**
- * @brief Start replaying a signal
- * @param filename File to replay
- * @return pdPASS on success, pdFAIL otherwise
+ * @brief Queue a file for replay (call before xTaskNotifyGive)
+ * @param filename Short filename (without SIGNAL_DIR path prefix)
+ * @return pdPASS on success, pdFAIL if replay already in progress
  */
 BaseType_t Replay_Start(const char *filename);
 
 /**
- * @brief Stop replay
+ * @brief Stop/cancel replay
  */
 void Replay_Stop(void);
 
@@ -64,4 +60,3 @@ uint8_t Replay_GetProgress(void);
 /*==================[end of file]============================================*/
 
 #endif /* _SIGNAL_REPLAY_H_ */
-
