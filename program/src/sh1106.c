@@ -172,7 +172,7 @@ void sh1106_draw(uint8_t x, uint8_t y, SH1106_Color color) {
 /// Endianness = Little-endian
 /// Data type = uint8_t
 /// ```
-void sh1106_place(const Sprite sprite, uint8_t x, uint8_t y) {
+void sh1106_place(const Sprite sprite, uint8_t x, uint8_t y, bool_t inverted) {
   uint8_t shift = y & 7;
   uint8_t pages = sprite.height / 8;
   uint8_t page, col;
@@ -181,6 +181,9 @@ void sh1106_place(const Sprite sprite, uint8_t x, uint8_t y) {
   for (page = 0; page < pages; page++) {
     for (col = 0; col < sprite.width; col++) {
       uint8_t imageByte = sprite.image[page * sprite.width + col];
+      if (inverted) {
+        imageByte = ~imageByte;
+      }
       uint8_t screenX = col + x;
       uint8_t screenPage = page + y / 8;
       if (screenX >= SH1106_WIDTH || screenPage >= SH1106_HEIGHT / 8)
@@ -209,15 +212,34 @@ void sh1106_place(const Sprite sprite, uint8_t x, uint8_t y) {
   if (lastBits != 0) {
     for (col = 0; col < sprite.width; col++) {
       uint8_t imageByte = sprite.image[page * sprite.width + col];
+      if (inverted) {
+        imageByte = ~imageByte;
+      }
       uint8_t screenX = col + x;
       uint8_t screenPage = page + y / 8;
       if (screenX >= SH1106_WIDTH || screenPage >= SH1106_HEIGHT / 8)
         continue;
 
+      // Mantener solo los bits válidos de la última página del sprite.
+      uint16_t validBits = imageByte & ~(0xFF << lastBits);
+      uint16_t shiftedBits = validBits << shift;
+      uint16_t shiftedMask = ~(0xFF << lastBits) << shift;
+
+      // Escribir parte baja en la página actual.
       buffer[screenPage * SH1106_WIDTH + screenX] =
-          (buffer[screenPage * SH1106_WIDTH + screenX] &
-           ~(~(0xFF << lastBits) << shift)) |
-          ((imageByte & ~(0xFF << lastBits)) << shift);
+          (buffer[screenPage * SH1106_WIDTH + screenX] & ~(shiftedMask & 0xFF)) |
+          (shiftedBits & 0xFF);
+
+      // Si hubo acarreo por el corrimiento, escribir también en página siguiente.
+      if ((shiftedMask >> 8) != 0) {
+        screenPage++;
+        if (screenPage >= SH1106_HEIGHT / 8)
+          continue;
+        buffer[screenPage * SH1106_WIDTH + screenX] =
+            (buffer[screenPage * SH1106_WIDTH + screenX] &
+             ~(uint8_t)(shiftedMask >> 8)) |
+            (uint8_t)(shiftedBits >> 8);
+      }
     }
   }
 }

@@ -30,6 +30,7 @@ void displayDrawLine(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1,
 void displayDrawRectangle(uint8_t x, uint8_t y, uint8_t width, uint8_t height,
                           DisplayColor color, bool_t filled);
 void displayPlace(const Sprite sprite, uint8_t x, uint8_t y);
+void displayText(const char *text, uint8_t x, uint8_t y, bool_t inverted);
 void displayUpdate();
 
 #endif

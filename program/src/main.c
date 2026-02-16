@@ -6,50 +6,51 @@
 //===----------------------------------------------------------------------===//
 
 #include "main.h"
+#include "buttons.h"
 #include "display.h"
 #include "sprites.h"
 
 int main(void) {
   // Inicializar placa, puertos y protocolos
   boardConfig();
-  i2cInit(I2C0, 100000);
+  adcConfig(ADC_ENABLE);
+  i2cConfig(I2C0, 100000);
 
   // Inicializar componentes
+  buttonsInit();
   displayInit();
 
-  displayPlace(Sprite_0001, 0, 0);
-  displayUpdate();
+  bool_t changed = true;
+  int8_t selected = -1;
+  int8_t last_joystick = 0;
 
-  bool_t tec1, tec2;
   while (1) {
-    if (tec1 != !gpioRead(TEC1)) {
-      tec1 = !gpioRead(TEC1);
-      gpioWrite(LED1, tec1);
-      if (tec1) {
-        displayDrawRectangle(64, 32, Sprite_0002.width, Sprite_0002.height,
-                             DISPLAY_BLACK, true);
-        displayDrawRectangle(104, 32, Sprite_0003.width, Sprite_0003.height,
-                             DISPLAY_BLACK, true);
-        displayPlace(Sprite_0002, 19, 32);
-        displayPlace(Sprite_0003, 59, 32);
-        displayUpdate();
+    JoystickState joystick = joystickRead();
+    if (joystick.x != last_joystick) {
+      if (joystick.x != 0) {
+        changed = true;
+        selected = joystick.x;
       }
-    }
-    if (tec2 != !gpioRead(TEC2)) {
-      tec2 = !gpioRead(TEC2);
-      gpioWrite(LED2, tec2);
-      if (tec2) {
-        displayDrawRectangle(19, 32, Sprite_0002.width, Sprite_0002.height,
-                             DISPLAY_BLACK, true);
-        displayDrawRectangle(59, 32, Sprite_0003.width, Sprite_0003.height,
-                             DISPLAY_BLACK, true);
-        displayPlace(Sprite_0002, 64, 32);
-        displayPlace(Sprite_0003, 104, 32);
-        displayUpdate();
-      }
+      last_joystick = joystick.x;
     }
 
-    delay(50);
+    if (changed) {
+      changed = false;
+      displayPlace(sprite_background, 0, 0);
+      displayPlace(sprite_title, 36, 4);
+      displayPlace(sprite_ir, 26, 22);
+      displayPlace(sprite_rf, 71, 22);
+      if (selected == -1) {
+        displayPlace(sprite_lselector, 19, 32);
+        displayPlace(sprite_rselector, 59, 32);
+      } else if (selected == 1) {
+        displayPlace(sprite_lselector, 64, 32);
+        displayPlace(sprite_rselector, 104, 32);
+      }
+      displayUpdate();
+    }
+
+    delay(100);
   }
 
   return 0;

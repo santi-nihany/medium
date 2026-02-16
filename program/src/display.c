@@ -132,7 +132,39 @@ void displayDrawRectangle(uint8_t x, uint8_t y, uint8_t width, uint8_t height,
 /// Data type = uint8_t
 /// ```
 void displayPlace(const Sprite sprite, uint8_t x, uint8_t y) {
-  sh1106_place(sprite, x, y);
+  sh1106_place(sprite, x, y, false);
+}
+
+/// Escribe texto con la fuente aseprite_mini.
+/// \param text texto a escribir
+/// \param x columna de inicio (esquina superior izquierda)
+/// \param y fila de inicio (esquina superior izquierda)
+/// \param inverted si es verdadero, dibuja texto invertido
+/// \note Solo se dibujan caracteres en el rango [ASEPRITE_MINI_START,
+/// ASEPRITE_MINI_END]. El resto se ignora.
+/// \note Si una letra excede los límites del display, se detiene la escritura.
+void displayText(const char *text, uint8_t x, uint8_t y, bool_t inverted) {
+  if (text == NULL || y >= DISPLAY_HEIGHT) {
+    return;
+  }
+
+  uint16_t cursorX = x;
+
+  for (uint16_t i = 0; text[i] != '\0'; i++) {
+    const uint8_t c = (uint8_t)text[i];
+    if (c < ASEPRITE_MINI_START || c > ASEPRITE_MINI_END) {
+      continue;
+    }
+
+    const Sprite sprite = aseprite_mini[c - ASEPRITE_MINI_START];
+    if ((uint16_t)y + sprite.height > DISPLAY_HEIGHT ||
+        cursorX + sprite.width > DISPLAY_WIDTH) {
+      break;
+    }
+
+    sh1106_place(sprite, (uint8_t)cursorX, y, inverted);
+    cursorX += sprite.width;
+  }
 }
 
 /// Actualiza el display con lo escrito en el buffer
