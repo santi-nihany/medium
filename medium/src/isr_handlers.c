@@ -8,7 +8,7 @@
  */
 
 #include "signal_capture.h"
-#include "ir_module.h"
+#include "modulo_ir.h"
 #include "FreeRTOS.h"
 #include "stream_buffer.h"
 #include "queue.h"

@@ -35,7 +35,7 @@
 /* Module includes */
 #include "cc1101.h"
 #include "rf_capture.h"
-#include "ir_module.h"
+#include "modulo_ir.h"
 #include "sh1106.h"
 
 /* FatFS includes for disk timer */
@@ -150,7 +150,7 @@ static void initHardware(void)
     /* === IR module init ===
      * Configures GPIO7 (IR RX) as input, GPIO5 (IR TX) as output,
      * TIMER2 as free-running µs counter */
-    ir_init();
+    modulo_ir_init();
     printf("[IR] IR module initialized\r\n");
 
     /* === SH1106 OLED display init ===
