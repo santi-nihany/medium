@@ -2,20 +2,37 @@
  * @file ir_module.c
  * @brief IR capture and transmit implementation
  *
- * Adapted from branch_ir modulo_IR_limpio.c.
- * - Capture: ISR-driven via PININT channel 0 + TIMER2 timestamps
+ * Adapted from branch_ir modulo_ir.c.
+ * - Timer: TIMER2 free-running µs counter for timestamps and delays
+ * - Capture (polling): ir_capture_polling() blocks and records IRPulse_t array
+ * - Capture (RTOS): ISR-driven via PININT ch0 → xStreamBufferIR (see isr_handlers.c)
  * - NEC decode: standard NEC protocol decoder
- * - NEC TX: blocking software-driven 38kHz carrier
+ * - NEC TX: blocking software-driven 38kHz carrier (ir_send_nec_blocking)
+ * - Carrier: Timer_0 callback for non-blocking 38kHz carrier (ir_carrier_on/off)
  */
 
 #include "ir_module.h"
 #include <stdio.h>
 
+/*==================[internal data]=========================================*/
+
+/* Polling capture state */
+static IRPulse_t pulseBuffer[IR_MAX_PULSES];
+static uint16_t pulseCount = 0;
+static uint8_t lastLevel = 1;
+static uint32_t lastTime = 0;
+static bool tramaCompleta = false;
+static bool captureStarted = false;
+
+/* Carrier / TX internals */
+static volatile bool carrierEnabled = false;
+static volatile bool carrierPhase = false;
+
 /*==================[timer functions]=======================================*/
 
 void ir_init(void)
 {
-    /* Configure IR RX pin as input with pull-up */
+    /* Configure IR RX pin as input */
     gpioConfig(IR_INPUT_PIN, GPIO_INPUT);
 
     /* Configure IR TX pin as output, default inactive */
@@ -35,12 +52,121 @@ uint32_t ir_getTimeUs(void)
     return Chip_TIMER_ReadCount(LPC_TIMER2);
 }
 
+void ir_resetTimeUs(void)
+{
+    Chip_TIMER_Reset(LPC_TIMER2);
+}
+
 static inline void ir_busyDelayUs(uint32_t us)
 {
     uint32_t start = ir_getTimeUs();
     while ((ir_getTimeUs() - start) < us) {
         ;
     }
+}
+
+/*==================[carrier (Timer_0 callback)]============================*/
+
+/**
+ * @brief Timer_0 callback for 38kHz carrier generation
+ * Called every ~13µs (half-period). Toggles IR TX pin when carrier is enabled.
+ */
+static void ir_carrierCallback(void *ptr)
+{
+    (void)ptr;
+    if (carrierEnabled) {
+        carrierPhase = !carrierPhase;
+        gpioWrite(IR_TX_PIN, carrierPhase ? IR_ACTIVE_LEVEL : (1 - IR_ACTIVE_LEVEL));
+    } else {
+        gpioWrite(IR_TX_PIN, 1 - IR_ACTIVE_LEVEL);
+    }
+}
+
+void ir_carrier_on(void)
+{
+    carrierEnabled = true;
+    Timer_Init(
+        0,
+        Timer_microsecondsToTicks(IR_CARRIER_HALF_US),
+        ir_carrierCallback
+    );
+}
+
+void ir_carrier_off(void)
+{
+    carrierEnabled = false;
+    Timer_DeInit(0);
+    gpioWrite(IR_TX_PIN, 1 - IR_ACTIVE_LEVEL);
+}
+
+/*==================[polling capture]=======================================*/
+
+bool ir_capture_polling(IRPulse_t *outBuffer, uint16_t *outCount)
+{
+    /* Wait for first edge (level change) */
+    uint32_t waitTimeout = 0;
+    uint8_t cur = gpioRead(IR_INPUT_PIN);
+    while (cur == lastLevel) {
+        delayInaccurateUs(IR_SAMPLE_US);
+        waitTimeout += IR_SAMPLE_US;
+        if (waitTimeout > 3000000) break;  /* 3s timeout */
+        cur = gpioRead(IR_INPUT_PIN);
+    }
+
+    if (cur != lastLevel) {
+        captureStarted = true;
+        lastLevel = cur;
+        pulseCount = 0;
+        lastTime = ir_getTimeUs();
+
+        /* Capture pulse sequence until frame timeout */
+        while (true) {
+            uint8_t level = gpioRead(IR_INPUT_PIN);
+            uint32_t now = ir_getTimeUs();
+
+            /* Detect edge (level change) */
+            if (level != lastLevel) {
+                uint32_t delta = now - lastTime;
+
+                /* Filter out short pulses (glitch rejection) */
+                if (delta >= IR_MIN_PULSE_US) {
+                    if (pulseCount < IR_MAX_PULSES && delta < 60000) {
+                        pulseBuffer[pulseCount].duration = delta;
+                        pulseBuffer[pulseCount].level = lastLevel;
+                        pulseCount++;
+                    }
+                    lastTime = now;
+                } else {
+                    lastTime = now;
+                }
+                lastLevel = level;
+            }
+
+            /* Check for end of frame (no edges for TIMEOUT_US) */
+            if (pulseCount > 3 && (now - lastTime) > IR_TIMEOUT_US) {
+                tramaCompleta = true;
+            }
+
+            if (tramaCompleta) break;
+
+            delayInaccurateUs(IR_SAMPLE_US);
+        }
+
+        /* Copy captured data to output buffer and reset state */
+        if (tramaCompleta) {
+            uint16_t toCopy = pulseCount < IR_MAX_PULSES ? pulseCount : IR_MAX_PULSES;
+            memcpy(outBuffer, pulseBuffer, sizeof(IRPulse_t) * toCopy);
+            *outCount = toCopy;
+
+            tramaCompleta = false;
+            pulseCount = 0;
+            lastLevel = 1;
+            captureStarted = false;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /*==================[NEC decoder]===========================================*/
@@ -95,7 +221,7 @@ bool ir_nec_decode(IRPulse_t *pulses, uint16_t count,
     uint8_t cmd      = (data >> 16) & 0xFF;
     uint8_t cmdInv   = (data >> 24) & 0xFF;
 
-    /* NEC verification */
+    /* NEC verification: address and command must match their inversions */
     if (addr != (uint8_t)~addrInv) return false;
     if (cmd  != (uint8_t)~cmdInv)  return false;
 
@@ -105,7 +231,7 @@ bool ir_nec_decode(IRPulse_t *pulses, uint16_t count,
     return true;
 }
 
-/*==================[NEC transmitter]=======================================*/
+/*==================[NEC transmitter (blocking)]============================*/
 
 void ir_send_nec_blocking(uint8_t addr, uint8_t cmd)
 {
@@ -115,7 +241,7 @@ void ir_send_nec_blocking(uint8_t addr, uint8_t cmd)
                     ((uint32_t)addrInv << 8) |
                     ((uint32_t)cmd << 16) |
                     ((uint32_t)cmdInv << 24);
-    bool carrierPhase = false;
+    bool localPhase = false;
     uint32_t start;
 
     gpioConfig(IR_TX_PIN, GPIO_OUTPUT);
@@ -125,8 +251,8 @@ void ir_send_nec_blocking(uint8_t addr, uint8_t cmd)
     __disable_irq();
     start = ir_getTimeUs();
     while ((ir_getTimeUs() - start) < NEC_HDR_MARK) {
-        carrierPhase = !carrierPhase;
-        gpioWrite(IR_TX_PIN, carrierPhase ? IR_ACTIVE_LEVEL : (1 - IR_ACTIVE_LEVEL));
+        localPhase = !localPhase;
+        gpioWrite(IR_TX_PIN, localPhase ? IR_ACTIVE_LEVEL : (1 - IR_ACTIVE_LEVEL));
         ir_busyDelayUs(IR_CARRIER_HALF_US);
     }
 
@@ -139,8 +265,8 @@ void ir_send_nec_blocking(uint8_t addr, uint8_t cmd)
         /* Bit MARK (carrier ON for 560µs) */
         start = ir_getTimeUs();
         while ((ir_getTimeUs() - start) < NEC_BIT_MARK) {
-            carrierPhase = !carrierPhase;
-            gpioWrite(IR_TX_PIN, carrierPhase ? IR_ACTIVE_LEVEL : (1 - IR_ACTIVE_LEVEL));
+            localPhase = !localPhase;
+            gpioWrite(IR_TX_PIN, localPhase ? IR_ACTIVE_LEVEL : (1 - IR_ACTIVE_LEVEL));
             ir_busyDelayUs(IR_CARRIER_HALF_US);
         }
 
@@ -153,8 +279,8 @@ void ir_send_nec_blocking(uint8_t addr, uint8_t cmd)
     /* Stop MARK (carrier ON for 560µs) */
     start = ir_getTimeUs();
     while ((ir_getTimeUs() - start) < NEC_STOP_MARK) {
-        carrierPhase = !carrierPhase;
-        gpioWrite(IR_TX_PIN, carrierPhase ? IR_ACTIVE_LEVEL : (1 - IR_ACTIVE_LEVEL));
+        localPhase = !localPhase;
+        gpioWrite(IR_TX_PIN, localPhase ? IR_ACTIVE_LEVEL : (1 - IR_ACTIVE_LEVEL));
         ir_busyDelayUs(IR_CARRIER_HALF_US);
     }
 

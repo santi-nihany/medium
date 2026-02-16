@@ -2,22 +2,28 @@
  * @file ir_module.h
  * @brief IR capture and transmit module
  *
- * Adapted from branch_ir modulo_ir.h / modulo_IR_limpio.c.
- * ISR-driven capture using PININT + TIMER2, timer-driven NEC TX.
+ * Adapted from branch_ir modulo_ir.h / modulo_ir.c.
+ * - Polling capture: ir_capture_polling() captures IRPulse_t array (blocking)
+ * - ISR-driven capture: PININT + TIMER2 feeds xStreamBufferIR (RTOS primary)
+ * - NEC decode/encode
+ * - Timer-based carrier via sAPI Timer_0 callback
  */
 
 #ifndef _IR_MODULE_H_
 #define _IR_MODULE_H_
 
 #include "sapi.h"
+#include "sapi_timer.h"
 #include "chip.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 /*==================[IR pin configuration]=================================*/
 
 #define IR_INPUT_PIN       GPIO7   /* sAPI alias for IR receiver (KY-022) */
 #define IR_TX_PIN          GPIO5   /* sAPI alias for IR LED driver */
+#define IR_IRQ_CHANNEL     0       /* PININT channel for IR RX edge detection */
 
 /* Actual GPIO port/pin for IR RX (needed for PININT and ISR reads)
  * GPIO7 on EDU-CIAA = pin varies by sAPI mapping. These must match
@@ -37,6 +43,7 @@
 #define IR_TIMEOUT_US       40000   /* 40ms inactivity = end of frame */
 #define IR_MAX_PULSES       200
 #define IR_MIN_PULSE_US     300     /* Glitch filter threshold */
+#define IR_SAMPLE_US        30      /* Polling sample interval (µs) */
 
 /* NEC protocol timings (µs) */
 #define NEC_HDR_MARK    9000
@@ -53,21 +60,13 @@ typedef struct {
     uint32_t duration;
 } IRPulse_t;
 
-typedef enum {
-    IR_TX_IDLE,
-    IR_TX_HDR_MARK,
-    IR_TX_HDR_SPACE,
-    IR_TX_BIT_MARK,
-    IR_TX_BIT_SPACE,
-    IR_TX_STOP
-} ir_tx_state_t;
-
 /*==================[functions]=============================================*/
 
 /**
  * @brief Initialize IR module hardware
  * Configures GPIO7 as input (IR RX), GPIO5 as output (IR TX),
- * TIMER2 as free-running µs counter
+ * TIMER2 as free-running µs counter.
+ * NOTE: Does NOT call boardConfig() — caller must do that first.
  */
 void ir_init(void);
 
@@ -76,6 +75,25 @@ void ir_init(void);
  * @return Microsecond count from TIMER2
  */
 uint32_t ir_getTimeUs(void);
+
+/**
+ * @brief Reset TIMER2 counter to zero
+ */
+void ir_resetTimeUs(void);
+
+/**
+ * @brief Polling-based IR capture into IRPulse_t array
+ *
+ * Blocks until an IR frame is received or 3s timeout.
+ * Polls GPIO7 every 30µs, records level transitions.
+ * WARNING: This is blocking — in RTOS context, the ISR-driven
+ * capture (PININT → xStreamBufferIR → CaptureIR task) is preferred.
+ *
+ * @param outBuffer Array of at least IR_MAX_PULSES elements
+ * @param outCount  Output: number of pulses captured
+ * @return true if a complete frame was captured
+ */
+bool ir_capture_polling(IRPulse_t *outBuffer, uint16_t *outCount);
 
 /**
  * @brief Decode NEC protocol from pulse buffer
@@ -90,12 +108,23 @@ bool ir_nec_decode(IRPulse_t *pulses, uint16_t count,
 
 /**
  * @brief Send NEC command (blocking, software-driven carrier)
- * Uses TIMER2 busy-wait for carrier timing. Disables interrupts briefly
- * during critical carrier sections for precise 38kHz timing.
+ * Uses TIMER2 busy-wait for carrier timing. Disables interrupts
+ * during the entire ~110ms NEC transmission for precise 38kHz timing.
  * @param addr NEC address byte
  * @param cmd NEC command byte
  */
 void ir_send_nec_blocking(uint8_t addr, uint8_t cmd);
+
+/**
+ * @brief Enable 38kHz carrier on IR TX pin via Timer_0 callback
+ * Non-blocking — carrier runs autonomously via hardware timer interrupt.
+ */
+void ir_carrier_on(void);
+
+/**
+ * @brief Disable carrier and set IR TX pin inactive
+ */
+void ir_carrier_off(void);
 
 /*==================[end of file]===========================================*/
 
