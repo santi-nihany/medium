@@ -7,18 +7,17 @@
  */
 
 #include "signal_capture.h"
-#include "signal_storage.h"
 #include "modulo_ir.h"
 #include "rf_capture.h"
 #include "cc1101.h"
+#include "queue.h"
+#include "semphr.h"
 #include <stdio.h>
-#include <string.h>
 
 /*==================[internal data]==========================================*/
 
 static volatile BaseType_t xIRCaptureActive = pdFALSE;
 static volatile BaseType_t xRFCaptureActive = pdFALSE;
-static volatile uint32_t capture_start_time = 0;
 
 /*==================[external data]==========================================*/
 
@@ -104,6 +103,13 @@ void vSignalCaptureRF_Task(void *pvParameters)
         xRFCaptureActive = pdTRUE;
         printf("[CaptureRF] Capture triggered\r\n");
 
+        /* Log current RF config (matches branch_rf cmd_recraw pattern) */
+        printf("[CaptureRF] Freq: %.2f MHz\r\n", xCurrentRFConfig.freq_mhz);
+        printf("[CaptureRF] Modulation: %d\r\n", xCurrentRFConfig.modulation_mode);
+        printf("[CaptureRF] Bandwidth: %.2f kHz\r\n", xCurrentRFConfig.bandwidth_khz);
+        printf("[CaptureRF] Delay: %lu us\r\n", (unsigned long)xCurrentRFConfig.delay_us);
+        printf("[CaptureRF] Buffer: %d bytes\r\n", RF_RECORDING_BUFFER_SIZE);
+
         /* Allocate packet with 4096-byte data area directly */
         size_t data_size = RF_RECORDING_BUFFER_SIZE;
         packet = pvPortMalloc(sizeof(SignalPacket_t) + data_size);
@@ -114,13 +120,11 @@ void vSignalCaptureRF_Task(void *pvParameters)
             continue;
         }
 
-        /* Take SPI mutex to configure CC1101 for RX */
+        /* Take SPI mutex to configure CC1101 for async RX
+         * rf_setup() does full config: init, sidle, modulation, freq,
+         * BW, dataRate, pktFormat(3), syncMode(0), whitening, CRC */
         if (xSemaphoreTake(xSPIMutex, pdMS_TO_TICKS(2000)) == pdPASS) {
-            cc1101_setModulation(xCurrentRFConfig.modulation_mode);
-            cc1101_setFrequency(xCurrentRFConfig.freq_mhz);
-            cc1101_setRxBW(xCurrentRFConfig.bandwidth_khz);
-            cc1101_setPktFormat(3);  /* Async mode */
-            cc1101_setRxMode();
+            rf_setup();
             xSemaphoreGive(xSPIMutex);
         } else {
             printf("[CaptureRF] ERROR: Cannot take SPI mutex for config\r\n");
@@ -135,7 +139,8 @@ void vSignalCaptureRF_Task(void *pvParameters)
 
         printf("[CaptureRF] Waiting for signal on GDO0...\r\n");
 
-        /* Perform raw capture (GDO0 polling, no SPI during capture) */
+        /* Perform raw capture (GDO0 polling, no SPI during capture)
+         * rf_capture_raw sets pktFormat(3) + RX mode, then polls GDO0 */
         bool_t captured = rf_capture_raw(packet->data,
                                           (int)xCurrentRFConfig.delay_us);
 
@@ -163,30 +168,6 @@ void vSignalCaptureRF_Task(void *pvParameters)
         }
 
         xRFCaptureActive = pdFALSE;
-    }
-}
-
-void SignalCapture_Start(uint8_t mode)
-{
-    if (mode == SIGNAL_MODE_IR) {
-        xIRCaptureActive = pdTRUE;
-        capture_start_time = xTaskGetTickCount();
-        printf("IR capture started.\r\n");
-    } else if (mode == SIGNAL_MODE_RF) {
-        xRFCaptureActive = pdTRUE;
-        capture_start_time = xTaskGetTickCount();
-        printf("RF capture started.\r\n");
-    }
-}
-
-void SignalCapture_Stop(uint8_t mode)
-{
-    if (mode == SIGNAL_MODE_IR) {
-        xIRCaptureActive = pdFALSE;
-        printf("IR capture stopped.\r\n");
-    } else if (mode == SIGNAL_MODE_RF) {
-        xRFCaptureActive = pdFALSE;
-        printf("RF capture stopped.\r\n");
     }
 }
 

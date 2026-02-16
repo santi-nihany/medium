@@ -13,9 +13,6 @@
 extern "C" {
 #endif
 
-/* Disk timer hook (required by FatFS) */
-void diskTickHook(void *ptr);
-
 /* Task handles (defined in main.c, used by UI controller for notifications) */
 extern TaskHandle_t xTaskSignalCaptureIR;
 extern TaskHandle_t xTaskSignalCaptureRF;
@@ -26,5 +23,3 @@ extern TaskHandle_t xTaskReplay;
 #endif
 
 #endif /* MEDIUM_MAIN_H_ */
-
-

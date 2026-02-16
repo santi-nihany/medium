@@ -4,9 +4,11 @@
 IR/RF signal capture, storage, and replay device using FreeRTOS on LPC microcontroller (EDU-CIAA).
 
 ## Architecture
-- **Event-Driven/Time-Driven hybrid** on preemptive FreeRTOS v10
-- **ISRs** capture signals → **StreamBuffers** → **Capture Tasks** → **StorageQueue** → **Storage Task** → microSD
-- **UI Task** handles FSM-based user interface via command queue
+- **Polling-based capture** triggered by UI via `xTaskNotifyGive()`
+- **IR capture**: `modulo_ir_capture()` polls GPIO7 at 30us intervals
+- **RF capture**: `rf_capture_raw()` polls CC1101 GDO0 pin
+- **Capture Tasks** → **StorageQueue** → **Storage Task** → microSD
+- **UI Task** handles FSM-based user interface with SH1106 OLED + 4 buttons
 
 ## Critical FreeRTOS Rules
 
@@ -16,16 +18,9 @@ IR/RF signal capture, storage, and replay device using FreeRTOS on LPC microcont
 - 2: Replay task
 - 1: UI and Housekeeping (low priority)
 
-### ISR Rules
-1. ALWAYS use `*FromISR()` variants: `xQueueSendFromISR`, `xStreamBufferSendFromISR`
-2. ALWAYS track `xHigherPriorityTaskWoken` and call `portYIELD_FROM_ISR()` at end
-3. NEVER use blocking calls in ISRs
-4. Keep ISRs minimal - defer work to tasks
-
 ### Queue/Buffer Patterns
 - **StorageQueue**: passes `SignalPacket_t*` pointers (ownership transfers to consumer)
 - **UICommandQueue**: passes `UICommand_t` by value
-- **StreamBuffers**: raw `uint32_t` samples from ISRs
 
 ### Memory Management
 - Use `pvPortMalloc/vPortFree` (NOT malloc/free)
@@ -41,37 +36,30 @@ void vMyTask(void *pvParameters)
     printf("[Module] Task started\r\n");
 
     for (;;) {
-        // Block on queue/semaphore/timer - ALWAYS use blocking, not polling
-        if (xQueueReceive(myQueue, &item, portMAX_DELAY) == pdPASS) {
-            // Process item
-        }
+        // Block on queue/semaphore/notification - ALWAYS use blocking, not polling
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        // Process
     }
 }
 ```
 
 ### Printf Prefix Convention
+- `[CaptureIR]` / `[CaptureRF]` for capture tasks
 - `[Storage]` for storage module
-- `[Test]` for test tasks
 - `[UI]` for UI controller
+- `[Housekeeping]` for housekeeping
 - Module name in brackets for all debug output
-
-## Testing Strategy
-1. Enable ONE task at a time with printf/vTaskDelay to verify scheduling
-2. Use `mock_signal_generator.c` to test full IPC flow without hardware
-3. Use `test_storage.c` to inject synthetic packets directly
-4. Monitor heap with Housekeeping task (should remain stable)
 
 ## File Structure
 - `src/` - Source files (.c)
 - `inc/` - Headers (.h)
 - `debug/` - Test plans and decision docs
 
-## Hardware TODOs (marked in code)
-- Timer capture for IR/RF timestamps
-- GPIO for buttons and signal levels
-- LCD display driver
-- RTC for real timestamps
-- Watchdog
+## SPI0 Bus Sharing
+- SD card CS: GPIO3[12] (P7_4) — CC1101 CS: GPIO0[15] (P1_20)
+- `xSPIMutex` serializes ALL SPI0 access (SD + CC1101)
+- During RF GDO0 polling capture, mutex is released (GPIO-only, no SPI)
+- Init order: `spiConfig(SPI0)` → SD CS remap (P7_4) → `cc1101_initGPIO()` (reclaims P6_1 for GDO2)
 
 ## FatFS Integration
 - **IMPORTANT**: `tickCallbackSet()` does NOT work with FreeRTOS!
@@ -79,14 +67,14 @@ void vMyTask(void *pvParameters)
 - Use `xSPIMutex` for exclusive SD access
 - Wait 500ms after `FSSDC_InitSPI()` before mounting (let timer stabilize card)
 - File path format: `SDC:/signals/signal_IR_000001.sig`
-- File format: ASCII header + binary samples
+- IR file format: `MED1;VER1;TS=...;MODE=0;SAMPLES=...\r\n` + binary uint32_t samples
+- RF file format: `CC1101_CAPTURE;VER1\r\n` + metadata lines + `---DATA_START---\r\n` + raw bytes
 
 ## Common Pitfalls to Avoid
-1. Don't use `xTaskGetTickCountFromISR()` in task context - use `xTaskGetTickCount()`
-2. Don't forget to `vPortFree()` received queue packets
-3. Don't access SD without taking `xSPIMutex`
-4. Don't use `printf` in time-critical ISRs
-5. Empty `for(;;)` loops without blocking will starve other tasks
+1. Don't forget to `vPortFree()` received queue packets
+2. Don't access SD without taking `xSPIMutex`
+3. Empty `for(;;)` loops without blocking will starve other tasks
+4. IR TX (`modulo_ir_send_nec`) blocks all interrupts for ~110ms — avoid during active captures
 
 ## Build
 ```bash

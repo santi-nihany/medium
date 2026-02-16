@@ -1,10 +1,9 @@
 /**
  * @file signal_capture.h
  * @brief Signal capture module for IR and RF signals
- * 
- * This module handles real-time capture of IR and RF signals using
- * hardware interrupts, stores raw timings in StreamBuffers, and packages
- * them for storage.
+ *
+ * IR capture: Polling-based via modulo_ir_capture() (triggered by task notification)
+ * RF capture: Polling-based via CC1101 GDO0 pin (triggered by task notification)
  */
 
 #ifndef _SIGNAL_CAPTURE_H_
@@ -13,18 +12,11 @@
 #include "FreeRTOS.h"
 #include "FreeRTOSConfig.h"
 #include "task.h"
-#include "stream_buffer.h"
 
 /*==================[macros and definitions]=================================*/
 
 #define SIGNAL_MODE_IR        0
 #define SIGNAL_MODE_RF        1
-
-/* Maximum capture duration in milliseconds */
-#define MAX_CAPTURE_DURATION  5000
-
-/* StreamBuffer watermark for triggering packet creation */
-#define STREAM_BUFFER_WATERMARK  256
 
 /*==================[types]==================================================*/
 
@@ -47,29 +39,19 @@ typedef struct {
 
 /**
  * @brief IR Signal Capture Task
- * Consumes data from StreamBuffer, packages it into packets and sends to Storage Queue
+ * Polls IR signal via modulo_ir_capture(), packages into SignalPacket_t
+ * and sends to Storage Queue
  * @param pvParameters Task parameters (unused)
  */
 void vSignalCaptureIR_Task(void *pvParameters);
 
 /**
  * @brief RF Signal Capture Task
- * Consumes data from StreamBuffer, packages it into packets and sends to Storage Queue
+ * Configures CC1101, polls GDO0 via rf_capture_raw(), packages into
+ * SignalPacket_t and sends to Storage Queue
  * @param pvParameters Task parameters (unused)
  */
 void vSignalCaptureRF_Task(void *pvParameters);
-
-/**
- * @brief Start signal capture
- * @param mode SIGNAL_MODE_IR or SIGNAL_MODE_RF
- */
-void SignalCapture_Start(uint8_t mode);
-
-/**
- * @brief Stop signal capture
- * @param mode SIGNAL_MODE_IR or SIGNAL_MODE_RF
- */
-void SignalCapture_Stop(uint8_t mode);
 
 /**
  * @brief Check if capture is active
@@ -81,4 +63,3 @@ BaseType_t SignalCapture_IsActive(uint8_t mode);
 /*==================[end of file]============================================*/
 
 #endif /* _SIGNAL_CAPTURE_H_ */
-

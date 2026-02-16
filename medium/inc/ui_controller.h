@@ -16,12 +16,6 @@
 
 /*==================[macros and definitions]=================================*/
 
-/* Button definitions */
-#define BUTTON_UP          0
-#define BUTTON_DOWN        1
-#define BUTTON_ENTER       2
-#define BUTTON_CANCEL      3
-
 /* UI States matching the flowchart */
 typedef enum {
     UI_STATE_MENU,              /* Main menu */

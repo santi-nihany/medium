@@ -5,9 +5,10 @@
  * Proyecto Médium: Captura, almacenamiento y reproducción de señales IR/RF
  *
  * Arquitectura:
- * - Event-Driven / Time-Driven híbrida sobre RTOS preemptivo
- * - Interrupciones HW capturan señales IR/RF mediante StreamBuffers
- * - Tareas de alta prioridad procesan y almacenan en microSD
+ * - Polling-based capture tasks triggered by UI via task notifications
+ * - IR capture: modulo_ir_capture() polling at 30us
+ * - RF capture: GDO0 polling via rf_capture_raw()
+ * - Storage task writes to microSD via FatFS
  * - UI Task gestiona interfaz de usuario y comandos
  */
 
@@ -16,7 +17,6 @@
 #include "FreeRTOS.h"
 #include "FreeRTOSConfig.h"
 #include "task.h"
-#include "stream_buffer.h"
 #include "queue.h"
 #include "semphr.h"
 #include "timers.h"
@@ -29,8 +29,6 @@
 #include "signal_replay.h"
 #include "ui_controller.h"
 #include "housekeeping.h"
-#include "test_storage.h"
-#include "mock_signal_generator.h"
 
 /* Module includes */
 #include "cc1101.h"
@@ -42,7 +40,6 @@
 #include "ff.h"
 
 /* Forward declarations */
-void diskTickHook(void *ptr);
 void disk_timerproc(void);
 static void vDiskTimerCallback(TimerHandle_t xTimer);
 
@@ -64,8 +61,6 @@ static void vDiskTimerCallback(TimerHandle_t xTimer);
 #define PRIORITY_REPLAY_TASK           2
 #define PRIORITY_UI_TASK               1
 #define PRIORITY_HOUSEKEEPING_TASK     1
-#define PRIORITY_TEST_STORAGE_TASK     1
-#define PRIORITY_MOCK_GENERATOR        1  /* Low priority - runs in background */
 
 /* Task stack sizes */
 #define STACK_SIZE_CAPTURE            512
@@ -73,19 +68,14 @@ static void vDiskTimerCallback(TimerHandle_t xTimer);
 #define STACK_SIZE_REPLAY             512
 #define STACK_SIZE_UI                1024
 #define STACK_SIZE_HOUSEKEEPING       256
-#define STACK_SIZE_TEST_STORAGE       512
-#define STACK_SIZE_MOCK_GENERATOR     256
 
-/* StreamBuffer and Queue sizes */
-#define STREAM_BUFFER_SIZE           2048
+/* Queue sizes */
 #define STORAGE_QUEUE_SIZE            10
 #define UI_COMMAND_QUEUE_SIZE          20
 
 /*==================[internal data definition]===============================*/
 
 /* FreeRTOS handles */
-StreamBufferHandle_t xStreamBufferIR = NULL;
-StreamBufferHandle_t xStreamBufferRF = NULL;
 QueueHandle_t xStorageQueue = NULL;
 QueueHandle_t xUICommandQueue = NULL;
 SemaphoreHandle_t xSPIMutex = NULL;
@@ -98,14 +88,8 @@ TaskHandle_t xTaskStorage = NULL;
 TaskHandle_t xTaskReplay = NULL;
 TaskHandle_t xTaskUI = NULL;
 static TaskHandle_t xTaskHousekeeping = NULL;
-static TaskHandle_t xTaskTestStorage = NULL;
-static TaskHandle_t xTaskMockGenerator = NULL;
 
-/*==================[external functions definition]==========================*/
-
-// FUNCION que se ejecuta cada vezque ocurre un Tick
-void diskTickHook( void *ptr );
-
+/*==================[internal functions]=====================================*/
 
 /**
  * @brief Initializes all hardware peripherals
@@ -149,7 +133,7 @@ static void initHardware(void)
 
     /* === IR module init ===
      * Configures GPIO7 (IR RX) as input, GPIO5 (IR TX) as output,
-     * TIMER2 as free-running µs counter */
+     * TIMER2 as free-running us counter */
     modulo_ir_init();
     printf("[IR] IR module initialized\r\n");
 
@@ -163,19 +147,10 @@ static void initHardware(void)
 }
 
 /**
- * @brief Creates all FreeRTOS primitives (queues, buffers, semaphores)
+ * @brief Creates all FreeRTOS primitives (queues, semaphores, timers)
  */
 static void initRTOSPrimitives(void)
 {
-    /* Create StreamBuffers for signal capture */
-    xStreamBufferIR = xStreamBufferCreate(STREAM_BUFFER_SIZE, sizeof(uint32_t));
-    xStreamBufferRF = xStreamBufferCreate(STREAM_BUFFER_SIZE, sizeof(uint32_t));
-
-    if (xStreamBufferIR == NULL || xStreamBufferRF == NULL) {
-        printf("ERROR: Failed to create StreamBuffers!\r\n");
-        while (1);
-    }
-
     /* Create Storage Queue */
     xStorageQueue = xQueueCreate(STORAGE_QUEUE_SIZE, sizeof(SignalPacket_t*));
     if (xStorageQueue == NULL) {
@@ -283,58 +258,7 @@ static void createTasks(void)
         &xTaskHousekeeping
     );
 
-    /* Test Storage Task - disabled for basic RTOS verification
-     * Enable when SD card is connected and ready for testing
-    xTaskCreate(
-        vStorageTest_Task,
-        "StorageTest",
-        STACK_SIZE_TEST_STORAGE,
-        NULL,
-        PRIORITY_TEST_STORAGE_TASK,
-        &xTaskTestStorage
-    );
-    */
-
-    /* Mock Signal Generator - for IPC testing without hardware */
-    xTaskCreate(
-        vMockSignalGenerator_Task,
-        "MockGen",
-        STACK_SIZE_MOCK_GENERATOR,
-        NULL,
-        PRIORITY_MOCK_GENERATOR,
-        &xTaskMockGenerator
-    );
-
     printf("Tasks created.\r\n");
-}
-
-/**
- * @brief Configure hardware interrupts
- */
-static void initInterrupts(void)
-{
-    /* === IR RX interrupt (PININT channel 0, both edges on GPIO7) ===
-     * GPIO7 = sAPI alias. Actual pin determined by sAPI internals.
-     * We configure PIN_INT0 for both-edge detection. */
-
-    /* Map GPIO interrupt source to PININT channel 0 */
-    Chip_SCU_GPIOIntPinSel(0, IR_RX_GPIO_PORT, IR_RX_GPIO_PIN);
-
-    /* Configure for both-edge sensitivity */
-    Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(0));
-    Chip_PININT_SetPinModeEdge(LPC_GPIO_PIN_INT, PININTCH(0));
-    Chip_PININT_EnableIntLow(LPC_GPIO_PIN_INT, PININTCH(0));
-    Chip_PININT_EnableIntHigh(LPC_GPIO_PIN_INT, PININTCH(0));
-
-    /* Set NVIC priority safe for FreeRTOS API calls */
-    NVIC_SetPriority(PIN_INT0_IRQn, configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY);
-    NVIC_ClearPendingIRQ(PIN_INT0_IRQn);
-    NVIC_EnableIRQ(PIN_INT0_IRQn);
-
-    /* Enable interrupts */
-    __enable_irq();
-
-    printf("Interrupts configured.\r\n");
 }
 
 /**
@@ -350,9 +274,6 @@ int main(void)
 
     /* Create tasks */
     createTasks();
-
-    /* Configure interrupts */
-    initInterrupts();
 
     /* Start the scheduler */
     printf("Starting FreeRTOS scheduler...\r\n");
@@ -373,16 +294,6 @@ static void vDiskTimerCallback(TimerHandle_t xTimer)
 {
     (void)xTimer;
     disk_timerproc();  // FatFS internal timing function
-}
-
-/**
- * @brief Legacy disk tick hook (not used with FreeRTOS)
- * Kept for compatibility but sAPI tickCallbackSet doesn't work with FreeRTOS
- */
-void diskTickHook(void *ptr)
-{
-    (void)ptr;
-    /* This is never called when using FreeRTOS - use vDiskTimerCallback instead */
 }
 
 /*==================[end of file]============================================*/

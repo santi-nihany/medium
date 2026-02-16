@@ -39,7 +39,7 @@ void modulo_ir_init(void);
 
 // Captura una trama IR en el buffer proporcionado.
 // Devuelve true si hay trama. outCount = cantidad de pulsos leidos.
-// WARNING: Blocking (up to 3s). In RTOS, prefer ISR-driven capture via xStreamBufferIR.
+// WARNING: Blocking (up to 3s). Called from vSignalCaptureIR_Task via task notification.
 bool modulo_ir_capture(IRPulse_t *outBuffer, uint16_t *outCount);
 
 // Decodificador NEC

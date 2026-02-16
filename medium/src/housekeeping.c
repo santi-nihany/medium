@@ -4,7 +4,6 @@
  */
 
 #include "housekeeping.h"
-#include "main.h"
 #include <stdio.h>
 
 /*==================[internal data]==========================================*/
