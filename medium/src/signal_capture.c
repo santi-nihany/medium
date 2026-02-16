@@ -2,12 +2,13 @@
  * @file signal_capture.c
  * @brief Signal capture implementation for IR and RF
  *
- * IR capture: ISR-driven via xStreamBufferIR (edge timing from GPIO interrupt)
+ * IR capture: Polling-based via modulo_ir_capture() (same approach as branch_ir)
  * RF capture: Polling-based via CC1101 GDO0 pin (triggered by task notification)
  */
 
 #include "signal_capture.h"
 #include "signal_storage.h"
+#include "modulo_ir.h"
 #include "rf_capture.h"
 #include "cc1101.h"
 #include <stdio.h>
@@ -21,8 +22,6 @@ static volatile uint32_t capture_start_time = 0;
 
 /*==================[external data]==========================================*/
 
-extern StreamBufferHandle_t xStreamBufferIR;
-extern StreamBufferHandle_t xStreamBufferRF;
 extern QueueHandle_t xStorageQueue;
 extern SemaphoreHandle_t xSPIMutex;
 
@@ -30,14 +29,9 @@ extern SemaphoreHandle_t xSPIMutex;
 
 void vSignalCaptureIR_Task(void *pvParameters)
 {
-    uint32_t sample_buffer[256];
-    uint32_t total_samples = 0;
-    size_t bytes_received;
+    IRPulse_t localBuf[MAX_PULSES];
+    uint16_t count = 0;
     SignalPacket_t *packet = NULL;
-    TickType_t capture_start = 0;
-
-    /* Timeout to detect end of signal burst (no new edges) */
-    const TickType_t BURST_TIMEOUT_MS = 100;
 
     printf("[CaptureIR] Task started, waiting for notification...\r\n");
 
@@ -45,57 +39,43 @@ void vSignalCaptureIR_Task(void *pvParameters)
         /* Wait for UI to enable capture via task notification */
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         xIRCaptureActive = pdTRUE;
-        printf("[CaptureIR] Capture enabled, waiting for IR data...\r\n");
+        printf("[CaptureIR] Capture enabled, waiting for IR signal...\r\n");
 
-        /* Wait for first sample of a burst */
-        bytes_received = xStreamBufferReceive(
-            xStreamBufferIR,
-            &sample_buffer[0],
-            sizeof(uint32_t),
-            pdMS_TO_TICKS(5000)  /* 5s timeout for signal */
-        );
+        /* Polling capture — blocks until frame received or 3s timeout
+         * (same approach as branch_ir main loop) */
+        bool captured = modulo_ir_capture(localBuf, &count);
 
-        if (bytes_received > 0) {
-            /* First sample received - record timestamp */
-            capture_start = xTaskGetTickCount();
-            total_samples = bytes_received / sizeof(uint32_t);
+        if (captured && count > 0) {
+            TickType_t capture_ts = xTaskGetTickCount();
 
-            /* Continue receiving with timeout until no more data */
-            while (total_samples < 256) {
-                size_t space_left = (256 - total_samples) * sizeof(uint32_t);
+            printf("[CaptureIR] Frame captured: %u pulses\r\n", (unsigned)count);
 
-                bytes_received = xStreamBufferReceive(
-                    xStreamBufferIR,
-                    &sample_buffer[total_samples],
-                    space_left,
-                    pdMS_TO_TICKS(BURST_TIMEOUT_MS)
-                );
-
-                if (bytes_received == 0) {
-                    /* Timeout - no more data, burst complete */
-                    break;
-                }
-
-                total_samples += bytes_received / sizeof(uint32_t);
+            /* Try NEC decode (informational) */
+            uint8_t addr, cmd;
+            if (modulo_ir_decode(localBuf, count, &addr, &cmd)) {
+                printf("[CaptureIR] NEC decoded: Addr=0x%02X Cmd=0x%02X\r\n", addr, cmd);
             }
 
-            /* Burst complete - create and send packet */
-            printf("[CaptureIR] Burst complete: %lu samples captured\r\n",
-                   (unsigned long)total_samples);
-
-            size_t data_size = total_samples * sizeof(uint32_t);
+            /* Convert IRPulse_t array → uint32_t samples for SignalPacket_t
+             * Format: (duration_us & 0x00FFFFFF) | (level << 24) */
+            size_t data_size = count * sizeof(uint32_t);
             packet = pvPortMalloc(sizeof(SignalPacket_t) + data_size);
 
             if (packet != NULL) {
                 packet->mode = SIGNAL_MODE_IR;
-                packet->timestamp_ms = capture_start;
-                packet->sample_count = total_samples;
-                memcpy(packet->data, sample_buffer, data_size);
+                packet->timestamp_ms = capture_ts;
+                packet->sample_count = count;
+
+                uint32_t *samples = (uint32_t *)packet->data;
+                for (uint16_t i = 0; i < count; i++) {
+                    samples[i] = (localBuf[i].duration & 0x00FFFFFF) |
+                                 ((uint32_t)localBuf[i].level << 24);
+                }
 
                 /* Send to storage queue */
                 if (xQueueSend(xStorageQueue, &packet, pdMS_TO_TICKS(1000)) == pdPASS) {
-                    printf("[CaptureIR] Packet (%lu samples) sent to queue\r\n",
-                           (unsigned long)total_samples);
+                    printf("[CaptureIR] Packet (%u pulses) sent to queue\r\n",
+                           (unsigned)count);
                 } else {
                     vPortFree(packet);
                     printf("[CaptureIR] ERROR: Queue full, packet dropped!\r\n");
@@ -103,9 +83,6 @@ void vSignalCaptureIR_Task(void *pvParameters)
             } else {
                 printf("[CaptureIR] ERROR: Failed to allocate packet!\r\n");
             }
-
-            /* Reset for next capture */
-            total_samples = 0;
         } else {
             printf("[CaptureIR] Timeout: no IR signal received\r\n");
         }
