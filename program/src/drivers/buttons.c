@@ -5,7 +5,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "buttons.h"
+#include "drivers/buttons.h"
 
 // Inicialización de los botones y el stick analógico
 // Asume placa inicializada y ADC habilitado

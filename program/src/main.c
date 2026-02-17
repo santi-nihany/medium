@@ -6,9 +6,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "main.h"
-#include "buttons.h"
-#include "display.h"
-#include "sprites.h"
+#include "drivers/buttons.h"
+#include "modules/display.h"
+#include "modules/sprites.h"
 
 int main(void) {
   // Inicializar placa, puertos y protocolos

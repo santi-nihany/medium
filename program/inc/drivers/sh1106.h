@@ -9,7 +9,7 @@
 #define SH1106_H
 
 #include "main.h"
-#include "sprites.h"
+#include "modules/sprites.h"
 
 /// Ancho del display en píxeles
 #define SH1106_WIDTH 128

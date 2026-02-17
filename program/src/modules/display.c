@@ -5,8 +5,8 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "display.h"
-#include "sh1106.h"
+#include "modules/display.h"
+#include "drivers/sh1106.h"
 
 #define _swap_bytes(a, b)                                                      \
   {                                                                            \

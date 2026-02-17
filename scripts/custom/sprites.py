@@ -160,7 +160,7 @@ def write_sprites_c(destination: Path, bmp_section: str, font_section: str) -> N
     output += "/// Sprites y otros gráficos. Generados automáicamente con custom/sprites.py.\n"
     output += "///\n"
     output += "//===----------------------------------------------------------------------===//\n\n"
-    output += '#include "sprites.h"\n\n'
+    output += '#include "modules/sprites.h"\n\n'
     output += bmp_section
     output += "\n"
     output += font_section
@@ -172,7 +172,7 @@ def main() -> None:
     sprites_dir = base_dir / "sprites"
     source = sprites_dir / "aseprite_mini.png"
     repo_root = base_dir.parents[1]
-    output_c = repo_root / "program" / "src" / "sprites.c"
+    output_c = repo_root / "program" / "src" / "modules" / "sprites.c"
 
     if not source.exists():
         raise FileNotFoundError(f"Missing source image: {source}")

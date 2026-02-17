@@ -5,7 +5,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "sh1106.h"
+#include "drivers/sh1106.h"
 
 /// Dirección I2C del SH1106
 #define SH1106_I2C_ADDR 0x3C
@@ -227,10 +227,12 @@ void sh1106_place(const Sprite sprite, uint8_t x, uint8_t y, bool_t inverted) {
 
       // Escribir parte baja en la página actual.
       buffer[screenPage * SH1106_WIDTH + screenX] =
-          (buffer[screenPage * SH1106_WIDTH + screenX] & ~(shiftedMask & 0xFF)) |
+          (buffer[screenPage * SH1106_WIDTH + screenX] &
+           ~(shiftedMask & 0xFF)) |
           (shiftedBits & 0xFF);
 
-      // Si hubo acarreo por el corrimiento, escribir también en página siguiente.
+      // Si hubo acarreo por el corrimiento, escribir también en página
+      // siguiente.
       if ((shiftedMask >> 8) != 0) {
         screenPage++;
         if (screenPage >= SH1106_HEIGHT / 8)
