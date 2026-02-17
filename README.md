@@ -26,3 +26,14 @@ make all      # para compilar
 make download # para bajar a la placa
 make clean    # para limpiar la salida 
 ```
+
+### Scripts
+
+En la carpeta `scripts/custom` se encuentran algunos scripts útiles para el desarrollo. Se necesita tener la herramienta [uv](https://docs.astral.sh/uv/) para manejar los paquetes de Python. Luego, se puede correr los scripts con:
+
+```bash
+cd scripts/custom
+uv sync                     # para instalar las dependencias
+uv run sprites.py           # genera el archivo sprites.c
+uv run terminal.py --help   # abre una terminal serial con la placa
+```
