@@ -13,6 +13,10 @@ void buttonsInit() {
   // Inicialización de GPIO para los botones
   gpioInit(SW_ENTER_PORT, GPIO_INPUT);
   gpioInit(SW_BACK_PORT, GPIO_INPUT);
+
+#ifdef MEDIUM_DEBUG
+  printf("[drivers/buttons] Botones inicializados\r\n");
+#endif
 }
 
 bool_t swEnterRead() { return !gpioRead(SW_ENTER_PORT); }

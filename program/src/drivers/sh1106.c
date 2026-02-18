@@ -70,6 +70,10 @@ void sh1106_init(void) {
   sh1106_command(SH1106_NORMALDISPLAY);
   sh1106_command(SH1106_DISPLAYON);
 
+#ifdef MEDIUM_DEBUG
+  printf("[drivers/sh1106] SH1106 inicializado\r\n");
+#endif
+
   sh1106_fill(SH1106_BLACK);
   sh1106_update();
 }
@@ -92,6 +96,10 @@ void sh1106_update() {
 
     i2cWrite(I2C0, SH1106_I2C_ADDR, data, SH1106_WIDTH + 1, TRUE);
   }
+
+#ifdef MEDIUM_DEBUG
+  printf("[drivers/sh1106] SH1106 actualizado\r\n");
+#endif
 }
 
 /// Pinta toda la pantalla del color especificado

@@ -54,22 +54,28 @@ USE_M0=n
 
 MODULES=$(sort $(dir $(wildcard libs/*/)))
 SRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/*.c)
+SRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/**/*.c)
 SRC+=$(foreach m, $(MODULES), $(wildcard $(m)/src/*.c))
 
 CXXSRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/*.cpp)
+CXXSRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/**/*.cpp)
 CXXSRC+=$(foreach m, $(MODULES), $(wildcard $(m)/src/*.cpp))
 
 # Arduino
 INOSRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/*.ino)
+INOSRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/**/*.ino)
 INOSRC+=$(foreach m, $(MODULES), $(wildcard $(m)/src/*.ino))
 
 ASRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/*.s)
+ASRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/**/*.s)
 ASRC+=$(foreach m, $(MODULES), $(wildcard $(m)/src/*.s))
 
 ASSRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/*.sx)
+ASSRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/**/*.sx)
 ASSRC+=$(foreach m, $(MODULES), $(wildcard $(m)/src/*.sx))
 
 ASSSRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/*.S)
+ASSSRC+=$(wildcard $(PROGRAM_PATH_AND_NAME)/src/**/*.S)
 ASSSRC+=$(foreach m, $(MODULES), $(wildcard $(m)/src/*.S))
 
 OUT=$(PROGRAM_PATH_AND_NAME)/out
@@ -190,32 +196,32 @@ $(OUT):
 $(OUT)/%.o: %.c
 	@echo CC $(notdir $<)
 	@mkdir -p $(dir $@)
-	$(Q)$(CC) -MMD $(CFLAGS) -c -o $@ $<
+	$(Q)$(CC) -MMD -MP $(CFLAGS) -c -o $@ $<
 
 $(OUT)/%.o: %.cpp
 	@echo CXX $(notdir $<)
 	@mkdir -p $(dir $@)
-	$(Q)$(CXX) -MMD $(CXXFLAGS) -c -o $@ $<
+	$(Q)$(CXX) -MMD -MP $(CXXFLAGS) -c -o $@ $<
 
 $(OUT)/%.o: %.ino
 	@echo ARDUINO CXX $(notdir $<)
 	@mkdir -p $(dir $@)
-	$(Q)$(CXX) -MMD $(INOFLAGS) -c -o $@ $<
+	$(Q)$(CXX) -MMD -MP $(INOFLAGS) -c -o $@ $<
 
 $(OUT)/%.o: %.s
 	@echo AS $(notdir $<)
 	@mkdir -p $(dir $@)
-	$(Q)$(CC) -MMD $(CFLAGS) -c -o $@ $<
+	$(Q)$(CC) -MMD -MP $(CFLAGS) -c -o $@ $<
 
 $(OUT)/%.o: %.sx
 	@echo AS $(notdir $<)
 	@mkdir -p $(dir $@)
-	$(Q)$(CC) -MMD $(CFLAGS) -c -o $@ $<
+	$(Q)$(CC) -MMD -MP $(CFLAGS) -c -o $@ $<
 
 $(OUT)/%.o: %.S
 	@echo AS $<
 	@mkdir -p $(dir $@)
-	$(Q)$(CC) -MMD $(CFLAGS) -c -o $@ $<
+	$(Q)$(CC) -MMD -MP $(CFLAGS) -c -o $@ $<
 
 $(OUT)/%.a: %.hexlib
 	@echo DEBLOB $(notdir $<)

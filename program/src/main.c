@@ -8,17 +8,30 @@
 #include "main.h"
 #include "drivers/buttons.h"
 #include "modules/display.h"
+#include "modules/rf.h"
 #include "modules/sprites.h"
 
 int main(void) {
   // Inicializar placa, puertos y protocolos
   boardConfig();
-  adcConfig(ADC_ENABLE);
-  i2cConfig(I2C0, 100000);
+  adcConfig(ADC_ENABLE);   // Usado por buttons.c
+  i2cConfig(I2C0, 100000); // Usado por sh1106.c
+  spiConfig(SPI0);         // Usado por microsd.c
+
+#ifdef MEDIUM_DEBUG
+  // Configurar UART para debug
+  uartConfig(UART_USB, 115200);
+  printf("\r\n\r\n========== Terminal de Médium\r\n");
+#endif
 
   // Inicializar componentes
   buttonsInit();
   displayInit();
+  rfInit();
+
+#ifdef MEDIUM_DEBUG
+  printf("========== Componentes inicializados\r\n");
+#endif
 
   bool_t changed = true;
   int8_t selected = -1;
@@ -47,6 +60,9 @@ int main(void) {
         displayPlace(sprite_lselector, 64, 32);
         displayPlace(sprite_rselector, 104, 32);
       }
+
+      rfCapture315MHz();
+
       displayUpdate();
     }
 

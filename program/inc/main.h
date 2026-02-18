@@ -12,4 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+/// Habilitar mensajes de debug por UART
+#define MEDIUM_DEBUG 1
+
 #endif
