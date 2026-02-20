@@ -10,12 +10,15 @@
         "${workspaceFolder}/libs/minut/inc",
         "${workspaceFolder}/libs/plc/ide4plc/inc",
         "${workspaceFolder}/libs/seos_pont/seos_pont_2014/inc",
+        "${workspaceFolder}/libs/lpc_fatfs_disks/sapi/inc",
+        "${workspaceFolder}/libs/lpc_fatfs_disks/source",
         "${workspaceFolder}/libs/lpc_open/boards/edu_ciaa_nxp/inc",
         "${workspaceFolder}/libs/lpc_open/boards/inc",
         "${workspaceFolder}/libs/lpc_open/lpc_chip_43xx/inc",
         "${workspaceFolder}/libs/lpc_open/lpc_chip_43xx/usbd_rom",
         "${workspaceFolder}/libs/sapi/sapi_v0.6.2/**/inc",
-        "${workspaceFolder}/libs/sapi/sapi_v0.6.2/external_peripherals/display/drivers/**"
+        "${workspaceFolder}/libs/sapi/sapi_v0.6.2/external_peripherals/display/drivers/**",
+        "${workspaceFolder}/libs/fatfs/source"
       ],
       "defines": [
         "__USE_LPCOPEN",

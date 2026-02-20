@@ -1,5 +1,9 @@
 # Médium
 
+🔮 _comunicación invisible_ 🔮
+
+Dispositivo para leer y emitir señales infrarrojas y de radiofrecuencia. Basado en la [EDU-CIAA-NXP](https://www.proyecto-ciaa.com.ar/devwiki/doku.php%3Fid=desarrollo:edu-ciaa:edu-ciaa-nxp.html), que cuenta con un procesador LPC4337.
+
 ## Desarrollo
 
 Para instalar

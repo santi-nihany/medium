@@ -36,7 +36,7 @@ const cc1101OokConfig_t CC1101_OOK_CONFIG_433 = {
     .addressCheckEnable = FALSE,
     .syncWord = 0xD391,
     .dataRateBps = 38400,
-    .rxBandwidthHz = 102000,
+    .rxBandwidthHz = 60000,
     .asyncSerialMode = FALSE,
     .paTable = CC1101_OOK_PA_TABLE_433,
     .paTableSize = 2,
@@ -54,7 +54,7 @@ const cc1101OokConfig_t CC1101_OOK_CONFIG_315 = {
     .addressCheckEnable = FALSE,
     .syncWord = 0xD391,
     .dataRateBps = 38400,
-    .rxBandwidthHz = 102000,
+    .rxBandwidthHz = 812500,
     .asyncSerialMode = FALSE,
     .paTable = CC1101_OOK_PA_TABLE_315,
     .paTableSize = 2,
@@ -295,12 +295,12 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
                         &mdmcfg3RateBits);
   cc1101_frequencyRegisters(config->band, &freq2, &freq1, &freq0);
 
-  pktctrl1 = config->asyncSerialMode ? 0x00
-                                     : (config->addressCheckEnable ? 0x05 : 0x04);
-  pktctrl0 = config->asyncSerialMode
-                 ? 0x30
-                 : ((config->variableLength ? 0x01 : 0x00) |
-                    (config->crcEnable ? 0x04 : 0x00));
+  pktctrl1 = config->asyncSerialMode
+                 ? 0x00
+                 : (config->addressCheckEnable ? 0x05 : 0x04);
+  pktctrl0 = config->asyncSerialMode ? 0x30
+                                     : ((config->variableLength ? 0x01 : 0x00) |
+                                        (config->crcEnable ? 0x04 : 0x00));
   frend0 = 0x10 | (config->paPowerIndex & 0x07);
 
   if (!cc1101_enterIdle()) {
@@ -319,7 +319,8 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
     return FALSE;
   }
 
-  if (!cc1101_writeRegister(CC1101_IOCFG0, config->asyncSerialMode ? 0x0D : 0x06) ||
+  if (!cc1101_writeRegister(CC1101_IOCFG0,
+                            config->asyncSerialMode ? 0x0D : 0x06) ||
       !cc1101_writeRegister(CC1101_SYNC1, (uint8_t)(config->syncWord >> 8)) ||
       !cc1101_writeRegister(CC1101_SYNC0, (uint8_t)(config->syncWord & 0xFF)) ||
       !cc1101_writeRegister(CC1101_PKTLEN, config->packetLength) ||
@@ -332,10 +333,9 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
       !cc1101_writeRegister(CC1101_FREQ0, freq0) ||
       !cc1101_writeRegister(CC1101_MDMCFG4, mdmcfg4BwBits | mdmcfg4RateBits) ||
       !cc1101_writeRegister(CC1101_MDMCFG3, mdmcfg3RateBits) ||
-      !cc1101_writeRegister(CC1101_MDMCFG2, 0x30 |
-                                              (config->asyncSerialMode
-                                                   ? 0x00
-                                                   : CC1101_SYNC_MODE_30_32)) ||
+      !cc1101_writeRegister(
+          CC1101_MDMCFG2,
+          0x30 | (config->asyncSerialMode ? 0x00 : CC1101_SYNC_MODE_30_32)) ||
       !cc1101_writeRegister(CC1101_DEVIATN, 0x00) ||
       !cc1101_writeRegister(CC1101_FREND0, frend0)) {
 #ifdef MEDIUM_DEBUG
@@ -352,12 +352,12 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
   }
 
 #ifdef MEDIUM_DEBUG
-  printf(
-      "[drivers/cc1101] OOK cfg OK band=%s ch=%u rate=%lu bw=%luHz async=%u "
-      "sync=0x%04X pklen=%u\r\n",
-      (config->band == CC1101_BAND_315MHZ) ? "315" : "433", config->channel,
-      (unsigned long)config->dataRateBps, (unsigned long)config->rxBandwidthHz,
-      config->asyncSerialMode, config->syncWord, config->packetLength);
+  printf("[drivers/cc1101] OOK cfg OK band=%s ch=%u rate=%lu bw=%luHz async=%u "
+         "sync=0x%04X pklen=%u\r\n",
+         (config->band == CC1101_BAND_315MHZ) ? "315" : "433", config->channel,
+         (unsigned long)config->dataRateBps,
+         (unsigned long)config->rxBandwidthHz, config->asyncSerialMode,
+         config->syncWord, config->packetLength);
 #endif
 
   return TRUE;
