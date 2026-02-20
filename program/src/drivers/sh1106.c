@@ -71,7 +71,7 @@ void sh1106_init(void) {
   sh1106_command(SH1106_DISPLAYON);
 
 #ifdef MEDIUM_DEBUG
-  printf("[drivers/sh1106] SH1106 inicializado\r\n");
+  printf("[drivers] [sh1106] SH1106 inicializado\r\n");
 #endif
 
   sh1106_fill(SH1106_BLACK);
@@ -98,7 +98,7 @@ void sh1106_update() {
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[drivers/sh1106] SH1106 actualizado\r\n");
+  printf("[drivers] [sh1106] SH1106 actualizado\r\n");
 #endif
 }
 

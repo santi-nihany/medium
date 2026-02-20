@@ -813,6 +813,9 @@ void FSSDC_InitSPI ()
     deselect ();    
     
 #ifndef FSSDC_SUPPORTS_HOT_INSERTION
+    // Sin pin CD, la extracción no actualiza automáticamente STA_NOINIT.
+    // Forzar re-inicialización en cada InitSPI para soportar reinserción.
+    g_diskStats |= STA_NOINIT;
     g_diskStats &= ~STA_NODISK;
     Board_UARTPutSTR ("FSSDC: [InitSPI] New card status: Inserted.\r\n");
     newCardStatus (FSSDC_CardStatus_Inserted);

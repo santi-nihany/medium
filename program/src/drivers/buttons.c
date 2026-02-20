@@ -15,7 +15,7 @@ void buttonsInit() {
   gpioInit(SW_BACK_PORT, GPIO_INPUT);
 
 #ifdef MEDIUM_DEBUG
-  printf("[drivers/buttons] Botones inicializados\r\n");
+  printf("[drivers] [buttons] Botones inicializados\r\n");
 #endif
 }
 

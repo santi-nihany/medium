@@ -5,7 +5,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "modules/sprites.h"
+#include "utils/sprites.h"
 
 // array size is 1024
 static const uint8_t sprite_background_image[] = {

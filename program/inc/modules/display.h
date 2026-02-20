@@ -9,7 +9,7 @@
 #define DISPLAY_H
 
 #include "main.h"
-#include "modules/sprites.h"
+#include "utils/sprites.h"
 
 /// Ancho del display en píxeles
 #define DISPLAY_WIDTH 128

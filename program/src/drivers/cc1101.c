@@ -197,7 +197,7 @@ bool_t cc1101_init(void) {
 
   if (!cc1101_reset()) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers/cc1101] ERROR: reset fallo\r\n");
+    printf("[drivers] [cc1101] ERROR: reset fallo\r\n");
 #endif
     return FALSE;
   }
@@ -205,20 +205,20 @@ bool_t cc1101_init(void) {
   // Aplicar configuración base OOK para la banda de 433 MHz
   if (!cc1101_applyOokConfig(&CC1101_OOK_CONFIG_433)) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers/cc1101] ERROR: config base 433 fallo\r\n");
+    printf("[drivers] [cc1101] ERROR: config base 433 fallo\r\n");
 #endif
     return FALSE;
   }
 
   if (!cc1101_flushRxFifo() || !cc1101_flushTxFifo() || !cc1101_enterIdle()) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers/cc1101] ERROR: flush/idle fallo\r\n");
+    printf("[drivers] [cc1101] ERROR: flush/idle fallo\r\n");
 #endif
     return FALSE;
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[drivers/cc1101] CC1101 inicializado (PART=0x%02X VER=0x%02X)\r\n",
+  printf("[drivers] [cc1101] CC1101 inicializado (PART=0x%02X VER=0x%02X)\r\n",
          cc1101_readRegister(CC1101_PARTNUM),
          cc1101_readRegister(CC1101_VERSION));
 #endif
@@ -240,7 +240,7 @@ bool_t cc1101_reset(void) {
 
   if (!cc1101_beginTransaction()) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers/cc1101] ERROR: beginTransaction en reset\r\n");
+    printf("[drivers] [cc1101] ERROR: beginTransaction en reset\r\n");
 #endif
     return FALSE;
   }
@@ -249,7 +249,7 @@ bool_t cc1101_reset(void) {
 
   if (!cc1101_waitReady()) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers/cc1101] ERROR: waitReady post-SRES timeout\r\n");
+    printf("[drivers] [cc1101] ERROR: waitReady post-SRES timeout\r\n");
 #endif
     cc1101_endTransaction();
     return FALSE;
@@ -285,7 +285,7 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
       config->paPowerIndex >= config->paTableSize || config->dataRateBps == 0 ||
       config->rxBandwidthHz == 0) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers/cc1101] ERROR: config OOK invalida\r\n");
+    printf("[drivers] [cc1101] ERROR: config OOK invalida\r\n");
 #endif
     return FALSE;
   }
@@ -305,7 +305,7 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
 
   if (!cc1101_enterIdle()) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers/cc1101] ERROR: no se pudo entrar en IDLE\r\n");
+    printf("[drivers] [cc1101] ERROR: no se pudo entrar en IDLE\r\n");
 #endif
     return FALSE;
   }
@@ -314,7 +314,7 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
                                   sizeof(commonRegisters) /
                                       sizeof(commonRegisters[0]))) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers/cc1101] ERROR: applyRegisterConfig fallo\r\n");
+    printf("[drivers] [cc1101] ERROR: applyRegisterConfig fallo\r\n");
 #endif
     return FALSE;
   }
@@ -339,25 +339,25 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
       !cc1101_writeRegister(CC1101_DEVIATN, 0x00) ||
       !cc1101_writeRegister(CC1101_FREND0, frend0)) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers/cc1101] ERROR: escritura de registros OOK fallo\r\n");
+    printf("[drivers] [cc1101] ERROR: escritura de registros OOK fallo\r\n");
 #endif
     return FALSE;
   }
 
   if (!cc1101_writePaTable(config->paTable, config->paTableSize)) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers/cc1101] ERROR: escritura PATABLE fallo\r\n");
+    printf("[drivers] [cc1101] ERROR: escritura PATABLE fallo\r\n");
 #endif
     return FALSE;
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[drivers/cc1101] OOK cfg OK band=%s ch=%u rate=%lu bw=%luHz async=%u "
-         "sync=0x%04X pklen=%u\r\n",
-         (config->band == CC1101_BAND_315MHZ) ? "315" : "433", config->channel,
-         (unsigned long)config->dataRateBps,
-         (unsigned long)config->rxBandwidthHz, config->asyncSerialMode,
-         config->syncWord, config->packetLength);
+  printf(
+      "[drivers] [cc1101] OOK cfg OK band=%s ch=%u rate=%lu bw=%luHz async=%u "
+      "sync=0x%04X pklen=%u\r\n",
+      (config->band == CC1101_BAND_315MHZ) ? "315" : "433", config->channel,
+      (unsigned long)config->dataRateBps, (unsigned long)config->rxBandwidthHz,
+      config->asyncSerialMode, config->syncWord, config->packetLength);
 #endif
 
   return TRUE;

@@ -19,8 +19,11 @@ typedef struct {
   uint32_t durationUs;
 } IRPulse;
 
+typedef bool_t (*irCancelCallback_t)(void *context);
+
 void irInit(void);
 bool_t irRecord(void);
+bool_t irRecordWithCancel(irCancelCallback_t cancelCallback, void *context);
 bool_t irReplay(void);
 bool_t irGetLastCapture(const IRPulse **pulses, uint16_t *count);
 bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,

@@ -41,3 +41,49 @@ uv sync                     # para instalar las dependencias
 uv run sprites.py           # genera el archivo sprites.c
 uv run terminal.py --help   # abre una terminal serial con la placa
 ```
+
+### Patches
+
+Se utilizó la última versión del [firmware_v3](https://github.com/epernia/firmware_v3/tree/548bcbf756a6260e241ef0d6820f4e2b3c81f765) para la CIAA en el momento de iniciar el proyecto (hash 548bcbf, publicada el 8 de abril de 2025). Sobre la misma se aplicarion los siguientes parches:
+
+- <details>
+  <summary>
+
+  `libs/lpc_fatfs_disks/sapi/src/sapi_sdcard.c`
+  
+  </summary>
+  
+  ```diff c
+  case FSSDC_CardStatus_Ready:
+    g_sdcard->status = SDCARD_Status_ReadyUnmounted;
+    // Automount
+  - if (!sdcardMount( true ))
+  - {
+  -     Board_UARTPutSTR ("sapi_sdcard: Automount failed!\r\n");
+  - }
+  + // El montaje se realiza desde la capa de aplicación para evitar
+  + // bloqueos durante la secuencia de inicialización.
+    break;
+  ```
+
+  </details>
+- <details>
+  <summary>
+
+  `libs/lpc_fatfs_disks/source/fssdc.c`
+  
+  </summary>
+  
+  ```diff c
+  #ifndef FSSDC_SUPPORTS_HOT_INSERTION
+  +   // Sin pin CD, la extracción no actualiza automáticamente STA_NOINIT.
+  +   // Forzar re-inicialización en cada InitSPI para soportar reinserción.
+  +   g_diskStats |= STA_NOINIT;
+      g_diskStats &= ~STA_NODISK;
+      Board_UARTPutSTR ("FSSDC: [InitSPI] New card status: Inserted.\r\n");
+      newCardStatus (FSSDC_CardStatus_Inserted);
+      FSSDC_FatFs_DiskInitialize ();
+  #endif
+  ```
+
+  </details>

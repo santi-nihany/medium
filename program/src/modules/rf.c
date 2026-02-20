@@ -36,11 +36,11 @@ static bool_t rfApplyCurrentProfile(void) {
   bool_t ok = cc1101_applyOokConfig(&rfCaptureConfig);
 #ifdef MEDIUM_DEBUG
   if (ok) {
-    printf("[modules/rf] Perfil %s aplicado (BW=%luHz)\r\n",
+    printf("[modules] [rf] Perfil %s aplicado (BW=%luHz)\r\n",
            (rfCaptureConfig.band == CC1101_BAND_315MHZ) ? "315MHz" : "433MHz",
            (unsigned long)rfCaptureConfig.rxBandwidthHz);
   } else {
-    printf("[modules/rf] ERROR: no se pudo aplicar perfil %s\r\n",
+    printf("[modules] [rf] ERROR: no se pudo aplicar perfil %s\r\n",
            (rfCaptureConfig.band == CC1101_BAND_315MHZ) ? "315MHz" : "433MHz");
   }
 #endif
@@ -66,7 +66,7 @@ static void rfFillConfigForBand(cc1101Band_t band) {
 bool_t rfInit(void) {
   if (!cc1101_init()) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/rf] ERROR: cc1101_init() fallo\r\n");
+    printf("[modules] [rf] ERROR: cc1101_init() fallo\r\n");
 #endif
     return FALSE;
   }
@@ -78,7 +78,7 @@ bool_t rfInit(void) {
 
   cc1101_enterRx();
 #ifdef MEDIUM_DEBUG
-  printf("[modules/rf] RF listo en RX (433MHz)\r\n");
+  printf("[modules] [rf] RF listo en RX (433MHz)\r\n");
 #endif
   return TRUE;
 }
@@ -101,8 +101,7 @@ bool_t rfSetCaptureBand(cc1101Band_t band) {
 }
 
 /// Captura una trama recibida y la guarda como secuencia de pulsos.
-bool_t rfCapture(void) {
-  bool_t seenPacket = FALSE;
+bool_t rfCaptureWithCancel(rfCancelCallback_t cancelCallback, void *context) {
   uint32_t elapsed = 0;
   bool_t level;
   bool_t lastLevel;
@@ -116,13 +115,19 @@ bool_t rfCapture(void) {
   cc1101_enterRx();
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/rf] Capturando señal en %s...\r\n",
+  printf("[modules] [rf] Capturando señal en %s...\r\n",
          (rfCaptureConfig.band == CC1101_BAND_315MHZ) ? "315MHz" : "433MHz");
 #endif
 
   level = cc1101_gdo0Read();
   while (elapsed < RF_CAPTURE_TIMEOUT_MS) {
     bool_t cur = cc1101_gdo0Read();
+    if (cancelCallback != NULL && cancelCallback(context)) {
+#ifdef MEDIUM_DEBUG
+      printf("[modules] [rf] Captura cancelada por callback\r\n");
+#endif
+      return FALSE;
+    }
     if (cur != level) {
       break;
     }
@@ -132,7 +137,7 @@ bool_t rfCapture(void) {
 
   if (elapsed >= RF_CAPTURE_TIMEOUT_MS) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/rf] ERROR: timeout esperando inicio de señal\r\n");
+    printf("[modules] [rf] ERROR: timeout esperando inicio de señal\r\n");
 #endif
     return FALSE;
   }
@@ -146,6 +151,13 @@ bool_t rfCapture(void) {
   while (rfPulseCount < RF_CAPTURE_PULSES_MAX) {
     nowCycles = cyclesCounterRead();
     level = cc1101_gdo0Read();
+
+    if (cancelCallback != NULL && cancelCallback(context)) {
+#ifdef MEDIUM_DEBUG
+      printf("[modules] [rf] Captura cancelada por callback\r\n");
+#endif
+      return FALSE;
+    }
 
     if (level != lastLevel) {
       uint32_t dtUs = rfCyclesToUs(nowCycles - lastEdgeCycles);
@@ -165,7 +177,7 @@ bool_t rfCapture(void) {
 
   if (rfPulseCount == 0) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/rf] ERROR: no se capturaron pulsos\r\n");
+    printf("[modules] [rf] ERROR: no se capturaron pulsos\r\n");
 #endif
     return FALSE;
   }
@@ -175,9 +187,9 @@ bool_t rfCapture(void) {
   rfCapturedConfig = rfCaptureConfig;
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/rf] Captura OK: %u pulsos, nivel inicial=%u\r\n",
+  printf("[modules] [rf] Captura OK: %u pulsos, nivel inicial=%u\r\n",
          rfPulseCount, rfFirstLevel);
-  printf("[modules/rf] Primeros pulsos(us): ");
+  printf("[modules] [rf] Primeros pulsos(us): ");
   for (uint16_t i = 0; i < rfPulseCount && i < 10; i++) {
     printf("%u ", rfPulseUs[i]);
   }
@@ -187,12 +199,24 @@ bool_t rfCapture(void) {
   return TRUE;
 }
 
+/// Captura una trama RF.
+bool_t rfCapture(void) { return rfCaptureWithCancel(NULL, NULL); }
+
 /// Captura en banda de 433 MHz.
 bool_t rfCapture433MHz(void) {
   if (!rfSetCaptureBand(CC1101_BAND_433MHZ)) {
     return FALSE;
   }
   return rfCapture();
+}
+
+/// Captura en banda de 433 MHz con callback de cancelación.
+bool_t rfCapture433MHzWithCancel(rfCancelCallback_t cancelCallback,
+                                 void *context) {
+  if (!rfSetCaptureBand(CC1101_BAND_433MHZ)) {
+    return FALSE;
+  }
+  return rfCaptureWithCancel(cancelCallback, context);
 }
 
 /// Captura en banda de 315 MHz.
@@ -203,18 +227,27 @@ bool_t rfCapture315MHz(void) {
   return rfCapture();
 }
 
+/// Captura en banda de 315 MHz con callback de cancelación.
+bool_t rfCapture315MHzWithCancel(rfCancelCallback_t cancelCallback,
+                                 void *context) {
+  if (!rfSetCaptureBand(CC1101_BAND_315MHZ)) {
+    return FALSE;
+  }
+  return rfCaptureWithCancel(cancelCallback, context);
+}
+
 /// Reproduce la última señal capturada como pulsos OOK.
 bool_t rfReplayCaptured(void) {
   bool_t level;
 
   if (!rfCaptureValid || rfPulseCount == 0) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/rf] ERROR: no hay captura valida para reproducir\r\n");
+    printf("[modules] [rf] ERROR: no hay captura valida para reproducir\r\n");
 #endif
     return FALSE;
   } else {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/rf] Inciando reproducción...\r\n");
+    printf("[modules] [rf] Inciando reproducción...\r\n");
 #endif
   }
 
@@ -231,16 +264,18 @@ bool_t rfReplayCaptured(void) {
   gpioWrite(CC1101_GDO0_PIN, level);
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/rf] Replay cfg: band=%s bw=%lu rate=%lu async=%u iocfg0=0x%02X pktctrl0=0x%02X\r\n",
+  printf("[modules] [rf] Replay cfg: band=%s bw=%lu rate=%lu async=%u "
+         "iocfg0=0x%02X pktctrl0=0x%02X\r\n",
          (rfCaptureConfig.band == CC1101_BAND_315MHZ) ? "315MHz" : "433MHz",
          (unsigned long)rfCaptureConfig.rxBandwidthHz,
-         (unsigned long)rfCaptureConfig.dataRateBps, rfCaptureConfig.asyncSerialMode,
-         cc1101_readRegister(CC1101_IOCFG0), cc1101_readRegister(CC1101_PKTCTRL0));
+         (unsigned long)rfCaptureConfig.dataRateBps,
+         rfCaptureConfig.asyncSerialMode, cc1101_readRegister(CC1101_IOCFG0),
+         cc1101_readRegister(CC1101_PKTCTRL0));
 #endif
 
   if (!cc1101_enterTx()) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/rf] ERROR: no se pudo entrar en TX\r\n");
+    printf("[modules] [rf] ERROR: no se pudo entrar en TX\r\n");
 #endif
     gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
     return FALSE;
@@ -259,7 +294,7 @@ bool_t rfReplayCaptured(void) {
   cc1101_enterRx();
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/rf] Replay OK: %u pulsos enviados (%s)\r\n", rfPulseCount,
+  printf("[modules] [rf] Replay OK: %u pulsos enviados (%s)\r\n", rfPulseCount,
          (rfCapturedBand == CC1101_BAND_315MHZ) ? "315MHz" : "433MHz");
 #endif
 
@@ -268,6 +303,20 @@ bool_t rfReplayCaptured(void) {
 
 /// Informa si hay una captura RF válida en memoria.
 bool_t rfHasCapture(void) { return rfCaptureValid; }
+
+/// Devuelve la última captura RF.
+bool_t rfGetLastCapture(const uint16_t **pulsesUs, uint16_t *count,
+                        bool_t *firstLevel) {
+  if (!rfCaptureValid || pulsesUs == NULL || count == NULL ||
+      firstLevel == NULL) {
+    return FALSE;
+  }
+
+  *pulsesUs = rfPulseUs;
+  *count = rfPulseCount;
+  *firstLevel = rfFirstLevel;
+  return TRUE;
+}
 
 /// Devuelve la banda de la última captura.
 cc1101Band_t rfLastCaptureBand(void) { return rfCapturedBand; }

@@ -110,12 +110,12 @@ void irInit(void) {
   irLastLevel = 1;
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/ir] IR inicializado\r\n");
+  printf("[modules] [ir] IR inicializado\r\n");
 #endif
 }
 
 /// Captura una trama IR por polling (alineado con legacy).
-bool_t irRecord(void) {
+bool_t irRecordWithCancel(irCancelCallback_t cancelCallback, void *context) {
   uint32_t startWaitUs;
   uint8_t cur = irRxRead();
   uint8_t startLevel = cur;
@@ -126,15 +126,21 @@ bool_t irRecord(void) {
   irPulseCount = 0;
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/ir] Iniciando captura IR...\r\n");
+  printf("[modules] [ir] Iniciando captura IR...\r\n");
 #endif
 
   startWaitUs = irGetTimeUs();
   while (cur == startLevel) {
+    if (cancelCallback != NULL && cancelCallback(context)) {
+#ifdef MEDIUM_DEBUG
+      printf("[modules] [ir] Captura cancelada por callback\r\n");
+#endif
+      return FALSE;
+    }
     delayInaccurateUs(IR_SAMPLE_US);
     if ((irGetTimeUs() - startWaitUs) > IR_START_TIMEOUT_US) {
 #ifdef MEDIUM_DEBUG
-      printf("[modules/ir] ERROR: timeout esperando señal IR\r\n");
+      printf("[modules] [ir] ERROR: timeout esperando señal IR\r\n");
 #endif
       return FALSE;
     }
@@ -147,6 +153,13 @@ bool_t irRecord(void) {
   while (1) {
     uint8_t level = irRxRead();
     uint32_t now = irGetTimeUs();
+
+    if (cancelCallback != NULL && cancelCallback(context)) {
+#ifdef MEDIUM_DEBUG
+      printf("[modules] [ir] Captura cancelada por callback\r\n");
+#endif
+      return FALSE;
+    }
 
     if (level != irLastLevel) {
       uint32_t delta = now - lastTime;
@@ -175,7 +188,7 @@ bool_t irRecord(void) {
 
   if (overflow) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/ir] ERROR: overflow de buffer de pulsos (%u)\r\n",
+    printf("[modules] [ir] ERROR: overflow de buffer de pulsos (%u)\r\n",
            IR_MAX_PULSES);
 #endif
     return FALSE;
@@ -183,7 +196,7 @@ bool_t irRecord(void) {
 
   if (irPulseCount == 0) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/ir] ERROR: no se capturaron pulsos IR\r\n");
+    printf("[modules] [ir] ERROR: no se capturaron pulsos IR\r\n");
 #endif
     return FALSE;
   }
@@ -192,8 +205,8 @@ bool_t irRecord(void) {
   irLastLevel = irRxRead();
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/ir] Captura IR OK: %u pulsos\r\n", irPulseCount);
-  printf("[modules/ir] Primeros pulsos(us): ");
+  printf("[modules] [ir] Captura IR OK: %u pulsos\r\n", irPulseCount);
+  printf("[modules] [ir] Primeros pulsos(us): ");
   for (uint16_t i = 0; i < irPulseCount && i < 10; i++) {
     printf("(%u,%lu) ", irPulseBuffer[i].level,
            (unsigned long)irPulseBuffer[i].durationUs);
@@ -204,17 +217,20 @@ bool_t irRecord(void) {
   return TRUE;
 }
 
+/// Captura una trama IR por polling.
+bool_t irRecord(void) { return irRecordWithCancel(NULL, NULL); }
+
 /// Reproduce la última trama IR capturada (0=mark, 1=space).
 bool_t irReplay(void) {
   if (!irCaptureValid || irPulseCount == 0) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/ir] ERROR: no hay trama IR para reproducir\r\n");
+    printf("[modules] [ir] ERROR: no hay trama IR para reproducir\r\n");
 #endif
     return FALSE;
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/ir] Reproduciendo trama IR (%u pulsos)\r\n", irPulseCount);
+  printf("[modules] [ir] Reproduciendo trama IR (%u pulsos)\r\n", irPulseCount);
 #endif
 
   __disable_irq();
@@ -230,7 +246,7 @@ bool_t irReplay(void) {
   irTxOff();
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/ir] Replay IR OK\r\n");
+  printf("[modules] [ir] Replay IR OK\r\n");
 #endif
   return TRUE;
 }
@@ -239,7 +255,7 @@ bool_t irReplay(void) {
 bool_t irGetLastCapture(const IRPulse **pulses, uint16_t *count) {
   if (!irCaptureValid || pulses == NULL || count == NULL) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/ir] WARN: irGetLastCapture sin captura valida\r\n");
+    printf("[modules] [ir] WARN: irGetLastCapture sin captura valida\r\n");
 #endif
     return FALSE;
   }
@@ -310,7 +326,7 @@ bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,
 
   if (pulses == NULL || address == NULL || command == NULL || count < 4) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/ir] NEC decode fail: parametros invalidos\r\n");
+    printf("[modules] [ir] NEC decode fail: parametros invalidos\r\n");
 #endif
     return FALSE;
   }
@@ -318,21 +334,22 @@ bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,
   if (!irFindNecHeader(pulses, count, &headerIndex, &markLevel, &spaceLevel,
                        &repeatFrame)) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/ir] NEC decode fail: header no encontrado\r\n");
+    printf("[modules] [ir] NEC decode fail: header no encontrado\r\n");
 #endif
     return FALSE;
   }
 
   if (repeatFrame) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/ir] NEC repeat frame detectado (sin datos)\r\n");
+    printf("[modules] [ir] NEC repeat frame detectado (sin datos)\r\n");
 #endif
     return FALSE;
   }
 
   if ((uint16_t)(headerIndex + 2 + (NEC_BITS * 2)) > count) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/ir] NEC decode fail: pulsos insuficientes desde header (%u)\r\n",
+    printf("[modules] [ir] NEC decode fail: pulsos insuficientes desde header "
+           "(%u)\r\n",
            count - headerIndex);
 #endif
     return FALSE;
@@ -344,7 +361,7 @@ bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,
 
     if (i + 1 >= count) {
 #ifdef MEDIUM_DEBUG
-      printf("[modules/ir] NEC decode fail: trama truncada en bit %u\r\n",
+      printf("[modules] [ir] NEC decode fail: trama truncada en bit %u\r\n",
              bitIndex);
 #endif
       return FALSE;
@@ -354,7 +371,8 @@ bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,
         !irInRange(pulses[i].durationUs, NEC_BIT_MARK_US - NEC_BIT_MARK_TOL_US,
                    NEC_BIT_MARK_US + NEC_BIT_MARK_TOL_US)) {
 #ifdef MEDIUM_DEBUG
-      printf("[modules/ir] NEC decode fail: mark invalida bit %u => (%u,%lu)\r\n",
+      printf("[modules] [ir] NEC decode fail: mark invalida bit %u => "
+             "(%u,%lu)\r\n",
              bitIndex, pulses[i].level, (unsigned long)pulses[i].durationUs);
 #endif
       return FALSE;
@@ -362,7 +380,8 @@ bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,
 
     if (pulses[i + 1].level != spaceLevel) {
 #ifdef MEDIUM_DEBUG
-      printf("[modules/ir] NEC decode fail: space con nivel invalido bit %u => (%u,%lu)\r\n",
+      printf("[modules] [ir] NEC decode fail: space con nivel invalido bit %u "
+             "=> (%u,%lu)\r\n",
              bitIndex, pulses[i + 1].level,
              (unsigned long)pulses[i + 1].durationUs);
 #endif
@@ -379,7 +398,8 @@ bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,
       bit = 1;
     } else {
 #ifdef MEDIUM_DEBUG
-      printf("[modules/ir] NEC decode fail: space fuera de rango bit %u => %lu us\r\n",
+      printf("[modules] [ir] NEC decode fail: space fuera de rango bit %u => "
+             "%lu us\r\n",
              bitIndex, (unsigned long)pulses[i + 1].durationUs);
 #endif
       return FALSE;
@@ -395,7 +415,7 @@ bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,
                    NEC_STOP_MARK_US - NEC_BIT_MARK_TOL_US,
                    NEC_STOP_MARK_US + NEC_BIT_MARK_TOL_US)) {
 #ifdef MEDIUM_DEBUG
-      printf("[modules/ir] NEC decode warn: stop mark atipica => %lu us\r\n",
+      printf("[modules] [ir] NEC decode warn: stop mark atipica => %lu us\r\n",
              (unsigned long)pulses[stopIndex].durationUs);
 #endif
     }
@@ -409,14 +429,16 @@ bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,
 
     if (addr != (uint8_t)~addrInv) {
 #ifdef MEDIUM_DEBUG
-      printf("[modules/ir] NEC decode fail: addr checksum invalido (0x%02X 0x%02X)\r\n",
+      printf("[modules] [ir] NEC decode fail: addr checksum invalido (0x%02X "
+             "0x%02X)\r\n",
              addr, addrInv);
 #endif
       return FALSE;
     }
     if (cmd != (uint8_t)~cmdInv) {
 #ifdef MEDIUM_DEBUG
-      printf("[modules/ir] NEC decode fail: cmd checksum invalido (0x%02X 0x%02X)\r\n",
+      printf("[modules] [ir] NEC decode fail: cmd checksum invalido (0x%02X "
+             "0x%02X)\r\n",
              cmd, cmdInv);
 #endif
       return FALSE;
@@ -427,7 +449,7 @@ bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/ir] NEC decode OK addr=0x%02X cmd=0x%02X\r\n", *address,
+  printf("[modules] [ir] NEC decode OK addr=0x%02X cmd=0x%02X\r\n", *address,
          *command);
 #endif
 
@@ -466,6 +488,6 @@ void irSendNec(uint8_t address, uint8_t command) {
   __enable_irq();
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/ir] NEC TX addr=0x%02X cmd=0x%02X\r\n", address, command);
+  printf("[modules] [ir] NEC TX addr=0x%02X cmd=0x%02X\r\n", address, command);
 #endif
 }

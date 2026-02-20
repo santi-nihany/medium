@@ -7,6 +7,7 @@
 
 #include "modules/storage.h"
 #include "chip.h"
+#include "diskio.h"
 #include "ff.h"
 #include "fssdc.h"
 #include "sapi_sdcard.h"
@@ -17,14 +18,43 @@
 #define STORAGE_PATH_MAX_LEN 128
 /// Cantidad de reinicios de init SPI ante error.
 #define STORAGE_SD_RECOVERY_RETRIES 3
+/// Período de reintento de init SPI sin pin CD (en llamadas a storageUpdate).
+#define STORAGE_REINIT_PERIOD_UPDATES 50U
+/// Reintentar init al acumular fallos de mount consecutivos.
+#define STORAGE_MOUNT_FAIL_REINIT_THRESHOLD 5U
 
 static sdcard_t storageSdCard;
 static bool_t storageSdReady = FALSE;
+static bool_t storageReinitPending = FALSE;
 
 /// Contexto de callbacks de lectura/escritura sobre FatFs.
 typedef struct {
   FIL *file;
 } storageFatFsContext_t;
+
+/// Inicializa el driver SD una única vez.
+static bool_t storageInitDriverIfNeeded(void) {
+  bool_t initOk = TRUE;
+
+  if (!storageSdReady) {
+    // FSSDC requiere CS ya muxeado y configurado como salida antes de InitSPI.
+    Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, FSSDC_CS_PORT, FSSDC_CS_PIN);
+    Chip_GPIO_SetPinOutHigh(LPC_GPIO_PORT, FSSDC_CS_PORT, FSSDC_CS_PIN);
+
+    initOk = sdcardInit(&storageSdCard);
+    storageSdReady = TRUE;
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [storage] sdcardInit solicitado\r\n");
+    printf("[modules] [storage] SD CS configurado en P%u_%u (HIGH)\r\n",
+           (unsigned)FSSDC_CS_PORT, (unsigned)FSSDC_CS_PIN);
+    if (!initOk) {
+      printf("[modules] [storage] WARN: sdcardInit devolvio FALSE\r\n");
+    }
+#endif
+  }
+
+  return initOk;
+}
 
 /// Texto para estado de la SD.
 static const char *storageStatusName(sdcardStatus_t status) {
@@ -109,22 +139,8 @@ static bool_t storageEnsureReady(void) {
   sdcardStatus_t lastStatus = SDCARD_Status_Error;
   uint8_t recoveries = 0U;
 
-  if (!storageSdReady) {
-    // FSSDC requiere CS ya muxeado y configurado como salida antes de InitSPI.
-    Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, FSSDC_CS_PORT, FSSDC_CS_PIN);
-    Chip_GPIO_SetPinOutHigh(LPC_GPIO_PORT, FSSDC_CS_PORT, FSSDC_CS_PIN);
-
-    bool_t initOk = sdcardInit(&storageSdCard);
-    storageSdReady = TRUE;
-#ifdef MEDIUM_DEBUG
-    printf("[modules/storage] sdcardInit solicitado\r\n");
-    printf("[modules/storage] SD CS configurado en P%u_%u (HIGH)\r\n",
-           (unsigned)FSSDC_CS_PORT, (unsigned)FSSDC_CS_PIN);
-    if (!initOk) {
-      printf("[modules/storage] WARN: sdcardInit devolvio FALSE (ya "
-             "inicializado o error)\r\n");
-    }
-#endif
+  if (!storageInitDriverIfNeeded()) {
+    return FALSE;
   }
 
   for (uint32_t t = 0; t < STORAGE_SD_READY_TIMEOUT_MS; t++) {
@@ -135,7 +151,7 @@ static bool_t storageEnsureReady(void) {
 
 #ifdef MEDIUM_DEBUG
     if (status != lastStatus) {
-      printf("[modules/storage] SD status -> %s\r\n",
+      printf("[modules] [storage] SD status -> %s\r\n",
              storageStatusName(status));
       lastStatus = status;
     }
@@ -143,13 +159,13 @@ static bool_t storageEnsureReady(void) {
 
     if (status == SDCARD_Status_ReadyMounted) {
 #ifdef MEDIUM_DEBUG
-      printf("[modules/storage] SD lista y montada\r\n");
+      printf("[modules] [storage] SD lista y montada\r\n");
 #endif
       return TRUE;
     }
     if (status == SDCARD_Status_ReadyUnmounted && sdcardMount(TRUE)) {
 #ifdef MEDIUM_DEBUG
-      printf("[modules/storage] SD montada OK\r\n");
+      printf("[modules] [storage] SD montada OK\r\n");
 #endif
       return TRUE;
     }
@@ -158,7 +174,7 @@ static bool_t storageEnsureReady(void) {
         recoveries < STORAGE_SD_RECOVERY_RETRIES) {
       recoveries++;
 #ifdef MEDIUM_DEBUG
-      printf("[modules/storage] WARN: SD en error, reintentando init SPI "
+      printf("[modules] [storage] WARN: SD en error, reintentando init SPI "
              "(%u/%u)\r\n",
              (unsigned)recoveries, (unsigned)STORAGE_SD_RECOVERY_RETRIES);
 #endif
@@ -170,7 +186,7 @@ static bool_t storageEnsureReady(void) {
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/storage] ERROR: timeout preparando SD (status=%u)\r\n",
+  printf("[modules] [storage] ERROR: timeout preparando SD (status=%u)\r\n",
          (unsigned)sdcardStatus());
 #endif
   return (sdcardStatus() == SDCARD_Status_ReadyMounted) ? TRUE : FALSE;
@@ -178,18 +194,108 @@ static bool_t storageEnsureReady(void) {
 
 /// Inicializa almacenamiento SD.
 bool_t storageInit(void) {
-  bool_t ok = storageEnsureReady();
+  bool_t ok = storageInitDriverIfNeeded();
+
 #ifdef MEDIUM_DEBUG
-  printf("[modules/storage] init %s\r\n", ok ? "OK" : "FAIL");
+  printf("[modules] [storage] init %s (no bloqueante)\r\n", ok ? "OK" : "FAIL");
 #endif
   return ok;
 }
 
 /// Actualiza estado de la SD.
 void storageUpdate(void) {
+  static uint32_t updateCounter = 0U;
+  static uint8_t mountFailStreak = 0U;
+
   if (storageSdReady) {
+    sdcardStatus_t status;
+
     sdcardUpdate();
+    status = sdcardStatus();
+    updateCounter++;
+
+    // Sin automount, intentar montar cuando el driver quedó listo.
+    if (status == SDCARD_Status_ReadyUnmounted) {
+      if (sdcardMount(TRUE)) {
+        mountFailStreak = 0U;
+        storageReinitPending = FALSE;
+#ifdef MEDIUM_DEBUG
+        printf("[modules] [storage] SD montada desde storageUpdate\r\n");
+#endif
+      } else {
+        mountFailStreak++;
+        if (storageReinitPending ||
+            mountFailStreak >= STORAGE_MOUNT_FAIL_REINIT_THRESHOLD) {
+          mountFailStreak = 0U;
+#ifdef MEDIUM_DEBUG
+          printf(
+              "[modules] [storage] WARN: mount falla repetido, reinit SPI\r\n");
+#endif
+          FSSDC_InitSPI();
+        }
+      }
+      return;
+    }
+
+    // Sin pin CD: reintentar init SPI periódicamente para detectar inserción.
+    if ((storageReinitPending || status == SDCARD_Status_Error ||
+         status == SDCARD_Status_Removed) &&
+        (updateCounter % STORAGE_REINIT_PERIOD_UPDATES) == 0U) {
+#ifdef MEDIUM_DEBUG
+      printf("[modules] [storage] WARN: reinit SPI periódico\r\n");
+#endif
+      FSSDC_InitSPI();
+    }
   }
+}
+
+/// Informa si la microSD está lista y montada.
+bool_t storageIsReady(void) {
+  if (!storageSdReady) {
+    return FALSE;
+  }
+  return (sdcardStatus() == SDCARD_Status_ReadyMounted) ? TRUE : FALSE;
+}
+
+/// Ejecuta un probe liviano de filesystem para detectar extracción sin pin CD.
+bool_t storageProbe(void) {
+  DWORD freeClusters = 0;
+  DWORD sectorCount = 0;
+  FATFS *fs = NULL;
+  FRESULT result;
+  DRESULT diskResult;
+
+  if (!storageIsReady()) {
+    return FALSE;
+  }
+
+  // Probe de bajo nivel: fuerza transacción SPI real contra la tarjeta.
+  diskResult = disk_ioctl(0, GET_SECTOR_COUNT, &sectorCount);
+  if (diskResult != RES_OK || sectorCount == 0U) {
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [storage] WARN: probe SD fallo (disk_ioctl=%u), "
+           "desmontando\r\n",
+           (unsigned)diskResult);
+#endif
+    (void)sdcardMount(FALSE);
+    storageReinitPending = TRUE;
+    return FALSE;
+  }
+
+  // Probe de filesystem: valida volumen FAT montado.
+  result = f_getfree("SDC:", &freeClusters, &fs);
+  if (result == FR_OK) {
+    return TRUE;
+  }
+
+#ifdef MEDIUM_DEBUG
+  printf("[modules] [storage] WARN: probe SD fallo (f_getfree=%u), "
+         "desmontando\r\n",
+         (unsigned)result);
+#endif
+  (void)sdcardMount(FALSE);
+  storageReinitPending = TRUE;
+  return FALSE;
 }
 
 /// Guarda un .sig en microSD mediante FatFs.
@@ -202,30 +308,30 @@ bool_t storageSigSave(const char *path, const sigRecord_t *record) {
 
   if (path == NULL || record == NULL) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/storage] ERROR: save con parametros invalidos\r\n");
+    printf("[modules] [storage] ERROR: save con parametros invalidos\r\n");
 #endif
     return FALSE;
   }
   if (!storageEnsureReady()) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/storage] ERROR: save sin SD lista\r\n");
+    printf("[modules] [storage] ERROR: save sin SD lista\r\n");
 #endif
     return FALSE;
   }
   if (!storageNormalizePath(path, fullPath, sizeof(fullPath))) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/storage] ERROR: path invalido para save: %s\r\n", path);
+    printf("[modules] [storage] ERROR: path invalido para save: %s\r\n", path);
 #endif
     return FALSE;
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/storage] Guardando .sig en %s\r\n", fullPath);
+  printf("[modules] [storage] Guardando .sig en %s\r\n", fullPath);
 #endif
   result = f_open(&file, fullPath, FA_WRITE | FA_CREATE_ALWAYS);
   if (result != FR_OK) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/storage] ERROR: f_open(save)=%u\r\n", (unsigned)result);
+    printf("[modules] [storage] ERROR: f_open(save)=%u\r\n", (unsigned)result);
 #endif
     return FALSE;
   }
@@ -237,14 +343,14 @@ bool_t storageSigSave(const char *path, const sigRecord_t *record) {
     ok = (syncResult == FR_OK) ? TRUE : FALSE;
 #ifdef MEDIUM_DEBUG
     if (!ok) {
-      printf("[modules/storage] ERROR: f_sync=%u\r\n", (unsigned)syncResult);
+      printf("[modules] [storage] ERROR: f_sync=%u\r\n", (unsigned)syncResult);
     }
 #endif
   }
 
   f_close(&file);
 #ifdef MEDIUM_DEBUG
-  printf("[modules/storage] Save %s (%lu edges, meta=%lu)\r\n",
+  printf("[modules] [storage] Save %s (%lu edges, meta=%lu)\r\n",
          ok ? "OK" : "FAIL", (unsigned long)record->edgeCount,
          (unsigned long)record->metadataSize);
 #endif
@@ -261,30 +367,30 @@ bool_t storageSigLoad(const char *path, sigRecordBuffer_t *record) {
 
   if (path == NULL || record == NULL) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/storage] ERROR: load con parametros invalidos\r\n");
+    printf("[modules] [storage] ERROR: load con parametros invalidos\r\n");
 #endif
     return FALSE;
   }
   if (!storageEnsureReady()) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/storage] ERROR: load sin SD lista\r\n");
+    printf("[modules] [storage] ERROR: load sin SD lista\r\n");
 #endif
     return FALSE;
   }
   if (!storageNormalizePath(path, fullPath, sizeof(fullPath))) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/storage] ERROR: path invalido para load: %s\r\n", path);
+    printf("[modules] [storage] ERROR: path invalido para load: %s\r\n", path);
 #endif
     return FALSE;
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules/storage] Cargando .sig desde %s\r\n", fullPath);
+  printf("[modules] [storage] Cargando .sig desde %s\r\n", fullPath);
 #endif
   result = f_open(&file, fullPath, FA_READ);
   if (result != FR_OK) {
 #ifdef MEDIUM_DEBUG
-    printf("[modules/storage] ERROR: f_open(load)=%u\r\n", (unsigned)result);
+    printf("[modules] [storage] ERROR: f_open(load)=%u\r\n", (unsigned)result);
 #endif
     return FALSE;
   }
@@ -295,12 +401,12 @@ bool_t storageSigLoad(const char *path, sigRecordBuffer_t *record) {
   f_close(&file);
 #ifdef MEDIUM_DEBUG
   if (ok) {
-    printf("[modules/storage] Load OK (type=%u edges=%lu meta=%lu "
+    printf("[modules] [storage] Load OK (type=%u edges=%lu meta=%lu "
            "tick_scale=%d)\r\n",
            (unsigned)record->signalType, (unsigned long)record->edgeCount,
            (unsigned long)record->metadataSize, (int)record->tickScale);
   } else {
-    printf("[modules/storage] Load FAIL (parse/CRC/capacidad)\r\n");
+    printf("[modules] [storage] Load FAIL (parse/CRC/capacidad)\r\n");
   }
 #endif
   return ok;

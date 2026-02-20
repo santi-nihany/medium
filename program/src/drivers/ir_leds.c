@@ -12,6 +12,10 @@ void irLedsInit(void) {
   gpioConfig(IR_TX_PIN, GPIO_OUTPUT);
   gpioConfig(IR_RX_PIN, GPIO_INPUT);
   irTxOff();
+
+#ifdef MEDIUM_DEBUG
+  printf("[drivers] [ir_leds] IR LED inicializados\r\n");
+#endif
 }
 
 /// Activa o desactiva el LED IR de transmisión.
