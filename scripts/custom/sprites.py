@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate C sprites from Aseprite's mini font atlas."""
+"""Generate C sprites from Aseprite's font atlas and other customs sprites."""
 
 from __future__ import annotations
 
@@ -14,19 +14,27 @@ BMP_SPRITE_FILES = [
     "rf.bmp",
     "lselector.bmp",
     "rselector.bmp",
+    "record.bmp",
+    "play.bmp",
+    "delete.bmp"
 ]
 
-# Aseprite mini font atlas layout:
+# Aseprite font atlas layout:
 # - ASCII starts at code 32 (' ')
 # - 16 columns
-# - 11px stride per cell (5x5 glyph + padding)
+# - 11px stride per cell (glyph + padding)
 # - top-left glyph pixel starts at (1, 1)
 ASCII_FIRST = 32
 ASCII_LAST = ord("z")
+FONT_FIRST = ASCII_FIRST
+FONT_LAST = 0xFC
+MINI_FIRST = ASCII_FIRST
+MINI_LAST = ASCII_LAST
 GRID_COLUMNS = 16
 CELL_STRIDE = 11
-GLYPH_SIZE = 5
 GRID_OFFSET = 1
+GLYPH_HEIGHT_MINI = 5
+GLYPH_HEIGHT_NORMAL = 7
 WHITE = (255, 255, 255, 255)
 BLACK = (0, 0, 0, 255)
 
@@ -104,52 +112,114 @@ def glyph_origin(code_point: int) -> tuple[int, int]:
     return x, y
 
 
-def glyph_cell(atlas: Image.Image, code_point: int) -> Image.Image:
+def glyph_cell(atlas: Image.Image, code_point: int, glyph_height: int) -> Image.Image:
     x, y = glyph_origin(code_point)
-    return atlas.crop((x, y, x + CELL_STRIDE, y + GLYPH_SIZE))
+    return atlas.crop((x, y, x + CELL_STRIDE, y + glyph_height))
 
 
-def glyph_width(cell: Image.Image) -> int:
+def glyph_width(cell: Image.Image, glyph_height: int) -> int:
     # Width is delimited by the first full-white column in glyph rows.
     for col in range(CELL_STRIDE):
-        if all(cell.getpixel((col, row)) == WHITE for row in range(GLYPH_SIZE)):
+        if all(cell.getpixel((col, row)) == WHITE for row in range(glyph_height)):
             return max(1, col)
     return CELL_STRIDE
 
 
-def encode_glyph_columns(cell: Image.Image, width: int) -> list[int]:
+def encode_glyph_columns(cell: Image.Image, width: int, glyph_height: int) -> list[int]:
     columns: list[int] = []
     for col in range(width):
         value = 0
-        for row in range(GLYPH_SIZE):
+        for row in range(glyph_height):
             if cell.getpixel((col, row)) == BLACK:
                 value |= 1 << row
         columns.append(value)
     return columns
 
 
-def render_font_section(glyphs: list[tuple[int, int, list[int]]]) -> str:
+def extract_font_glyphs(
+    source: Path, glyph_height: int, first_code_point: int, last_code_point: int
+) -> list[tuple[int, int, list[int]]]:
+    glyphs: list[tuple[int, int, list[int]]] = []
+    with Image.open(source) as atlas:
+        atlas = atlas.convert("RGBA")
+        for code_point in range(first_code_point, last_code_point + 1):
+            cell = glyph_cell(atlas, code_point, glyph_height)
+            width = glyph_width(cell, glyph_height)
+            columns = encode_glyph_columns(cell, width, glyph_height)
+            glyphs.append((code_point, width, columns))
+    return glyphs
+
+
+def render_single_font_section(
+    glyphs: list[tuple[int, int, list[int]]],
+    symbol_prefix: str,
+    glyph_height: int,
+    source_comment: str,
+    first_code_point: int,
+    last_code_point: int,
+) -> list[str]:
     lines: list[str] = [
-        "// Aseprite mini font:",
-        "// https://github.com/aseprite/aseprite/blob/efc30e24a55a01d0666358a0475af4e43fd7e2d2/data/fonts/aseprite_mini.png",
-        ""
+        source_comment,
+        "",
     ]
 
     for code_point, _, column_bytes in glyphs:
-        lines.append(c_array(f"aseprite_mini_{code_point:02x}", column_bytes))
+        lines.append(c_array(f"{symbol_prefix}_{code_point:02x}", column_bytes))
 
     lines.extend(
         [
             "",
-            "const Sprite aseprite_mini[ASEPRITE_MINI_END - ASEPRITE_MINI_START + 1] = {",
+            f"static const Sprite {symbol_prefix}_sprites[] = {{",
         ]
     )
     for code_point, width, _ in glyphs:
         lines.append(
             "    "
-            f"{{.width = {width}, .height = {GLYPH_SIZE}, .image = aseprite_mini_{code_point:02x}}},"
+            f"{{.width = {width}, .height = {glyph_height}, .image = {symbol_prefix}_{code_point:02x}}},"
         )
-    lines.extend(["};", ""])
+    lines.extend(
+        [
+            "};",
+            "",
+            f"const SpriteFont {symbol_prefix} = {{",
+            f"    .sprites = {symbol_prefix}_sprites,",
+            f"    .firstChar = 0x{first_code_point:02x},",
+            f"    .lastChar = 0x{last_code_point:02x},",
+            "};",
+        ]
+    )
+    return lines
+
+
+def render_font_section(
+    mini_glyphs: list[tuple[int, int, list[int]]],
+    normal_glyphs: list[tuple[int, int, list[int]]],
+) -> str:
+    lines: list[str] = []
+    lines.extend(
+        render_single_font_section(
+            normal_glyphs,
+            "aseprite_font",
+            GLYPH_HEIGHT_NORMAL,
+            "// Aseprite normal font:\n"
+            "// https://github.com/aseprite/aseprite/blob/efc30e24a55a01d0666358a0475af4e43fd7e2d2/data/fonts/aseprite_font.png",
+            FONT_FIRST,
+            FONT_LAST,
+        )
+    )
+    lines.append("")
+    lines.extend(
+        render_single_font_section(
+            mini_glyphs,
+            "aseprite_mini",
+            GLYPH_HEIGHT_MINI,
+            "// Aseprite mini font:\n"
+            "// https://github.com/aseprite/aseprite/blob/efc30e24a55a01d0666358a0475af4e43fd7e2d2/data/fonts/aseprite_mini.png",
+            MINI_FIRST,
+            MINI_LAST,
+        )
+    )
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -160,7 +230,7 @@ def write_sprites_c(destination: Path, bmp_section: str, font_section: str) -> N
     output += "/// Sprites y otros gráficos. Generados automáicamente con custom/sprites.py.\n"
     output += "///\n"
     output += "//===----------------------------------------------------------------------===//\n\n"
-    output += '#include "modules/sprites.h"\n\n'
+    output += '#include "utils/sprites.h"\n\n'
     output += bmp_section
     output += "\n"
     output += font_section
@@ -170,26 +240,27 @@ def write_sprites_c(destination: Path, bmp_section: str, font_section: str) -> N
 def main() -> None:
     base_dir = Path(__file__).resolve().parent
     sprites_dir = base_dir / "sprites"
-    source = sprites_dir / "aseprite_mini.png"
+    mini_source = sprites_dir / "aseprite_mini.png"
+    normal_source = sprites_dir / "aseprite_font.png"
     repo_root = base_dir.parents[1]
-    output_c = repo_root / "program" / "src" / "modules" / "sprites.c"
+    output_c = repo_root / "program" / "src" / "utils" / "sprites.c"
 
-    if not source.exists():
-        raise FileNotFoundError(f"Missing source image: {source}")
+    if not mini_source.exists():
+        raise FileNotFoundError(f"Missing source image: {mini_source}")
+    if not normal_source.exists():
+        raise FileNotFoundError(f"Missing source image: {normal_source}")
     if not sprites_dir.exists():
         raise FileNotFoundError(f"Missing sprites directory: {sprites_dir}")
 
-    glyphs: list[tuple[int, int, list[int]]] = []
-    with Image.open(source) as atlas:
-        atlas = atlas.convert("RGBA")
-        for code_point in range(ASCII_FIRST, ASCII_LAST + 1):
-            cell = glyph_cell(atlas, code_point)
-            width = glyph_width(cell)
-            columns = encode_glyph_columns(cell, width)
-            glyphs.append((code_point, width, columns))
+    mini_glyphs = extract_font_glyphs(
+        mini_source, GLYPH_HEIGHT_MINI, MINI_FIRST, MINI_LAST
+    )
+    normal_glyphs = extract_font_glyphs(
+        normal_source, GLYPH_HEIGHT_NORMAL, FONT_FIRST, FONT_LAST
+    )
 
     bmp_section = render_bmp_section(sprites_dir)
-    font_section = render_font_section(glyphs)
+    font_section = render_font_section(mini_glyphs, normal_glyphs)
     write_sprites_c(output_c, bmp_section, font_section)
     print(f"Wrote {output_c}")
 

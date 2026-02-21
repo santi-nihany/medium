@@ -20,6 +20,10 @@
 #define IR_CARRIER_FREQ_HZ 38000
 /// Medio período del carrier.
 #define IR_CARRIER_HALF_US (1000000 / (IR_CARRIER_FREQ_HZ * 2))
+/// Duración máxima permitida por edge al reproducir desde .sig.
+#define IR_REPLAY_MAX_EDGE_US 200000UL
+/// Duración total máxima permitida al reproducir desde .sig.
+#define IR_REPLAY_MAX_TOTAL_US 5000000UL
 
 /// Timings NEC en microsegundos.
 #define NEC_HDR_MARK_US 9000
@@ -69,6 +73,41 @@ static bool_t irInRange(uint32_t value, uint32_t min, uint32_t max) {
   return (value >= min && value <= max) ? TRUE : FALSE;
 }
 
+/// Calcula 10^exp para exp>=0 con saturación.
+static uint32_t irPow10U32(uint8_t exp) {
+  uint32_t value = 1U;
+  for (uint8_t i = 0; i < exp; i++) {
+    if (value > (0xFFFFFFFFUL / 10UL)) {
+      return 0xFFFFFFFFUL;
+    }
+    value *= 10U;
+  }
+  return value;
+}
+
+/// Convierte ticks de .sig a microsegundos según tickScale.
+static uint32_t irTicksToUs(uint32_t ticks, int8_t tickScale) {
+  if (tickScale >= -6) {
+    uint8_t exp = (uint8_t)(tickScale + 6);
+    uint32_t mul = irPow10U32(exp);
+    if (mul == 0xFFFFFFFFUL) {
+      return 0xFFFFFFFFUL;
+    }
+    if (ticks > (0xFFFFFFFFUL / mul)) {
+      return 0xFFFFFFFFUL;
+    }
+    return ticks * mul;
+  } else {
+    uint8_t exp = (uint8_t)(-6 - tickScale);
+    uint32_t div = irPow10U32(exp);
+    if (div == 0U) {
+      return 1U;
+    }
+    ticks = (ticks + (div / 2U)) / div;
+    return (ticks == 0U) ? 1U : ticks;
+  }
+}
+
 /// Lee contador de microsegundos.
 static uint32_t irGetTimeUs(void) { return irCyclesToUs(cyclesCounterRead()); }
 
@@ -114,8 +153,9 @@ void irInit(void) {
 #endif
 }
 
-/// Captura una trama IR por polling (alineado con legacy).
-bool_t irRecordWithCancel(irCancelCallback_t cancelCallback, void *context) {
+/// Captura una trama IR por polling.
+static bool_t irRecordInternal(irCancelCallback_t cancelCallback, void *context,
+                               bool_t useStartTimeout) {
   uint32_t startWaitUs;
   uint8_t cur = irRxRead();
   uint8_t startLevel = cur;
@@ -138,7 +178,8 @@ bool_t irRecordWithCancel(irCancelCallback_t cancelCallback, void *context) {
       return FALSE;
     }
     delayInaccurateUs(IR_SAMPLE_US);
-    if ((irGetTimeUs() - startWaitUs) > IR_START_TIMEOUT_US) {
+    if (useStartTimeout &&
+        (irGetTimeUs() - startWaitUs) > IR_START_TIMEOUT_US) {
 #ifdef MEDIUM_DEBUG
       printf("[modules] [ir] ERROR: timeout esperando señal IR\r\n");
 #endif
@@ -217,6 +258,17 @@ bool_t irRecordWithCancel(irCancelCallback_t cancelCallback, void *context) {
   return TRUE;
 }
 
+/// Captura una trama IR por polling (alineado con legacy).
+bool_t irRecordWithCancel(irCancelCallback_t cancelCallback, void *context) {
+  return irRecordInternal(cancelCallback, context, TRUE);
+}
+
+/// Captura sin timeout de inicio; solo se cancela por callback.
+bool_t irRecordNoStartTimeoutWithCancel(irCancelCallback_t cancelCallback,
+                                        void *context) {
+  return irRecordInternal(cancelCallback, context, FALSE);
+}
+
 /// Captura una trama IR por polling.
 bool_t irRecord(void) { return irRecordWithCancel(NULL, NULL); }
 
@@ -247,6 +299,67 @@ bool_t irReplay(void) {
 
 #ifdef MEDIUM_DEBUG
   printf("[modules] [ir] Replay IR OK\r\n");
+#endif
+  return TRUE;
+}
+
+/// Reproduce una secuencia de flancos cargada desde archivo .sig.
+bool_t irReplayEdges(const uint32_t *edges, uint32_t edgeCount,
+                     uint8_t startLevel, int8_t tickScale) {
+  uint8_t level = startLevel;
+  uint32_t totalUs = 0U;
+
+  if (edges == NULL || edgeCount == 0U) {
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [ir] ERROR: irReplayEdges sin datos\r\n");
+#endif
+    return FALSE;
+  }
+
+#ifdef MEDIUM_DEBUG
+  printf("[modules] [ir] Replay desde .sig: %lu edges, start=%u, scale=%d\r\n",
+         (unsigned long)edgeCount, (unsigned)startLevel, (int)tickScale);
+#endif
+
+  __disable_irq();
+  for (uint32_t i = 0; i < edgeCount; i++) {
+    uint32_t durationUs = irTicksToUs(edges[i], tickScale);
+    if (durationUs == 0U) {
+      durationUs = 1U;
+    }
+    if (durationUs > IR_REPLAY_MAX_EDGE_US) {
+      __enable_irq();
+#ifdef MEDIUM_DEBUG
+      printf("[modules] [ir] ERROR: edge demasiado largo (%luus)\r\n",
+             (unsigned long)durationUs);
+#endif
+      irTxOff();
+      return FALSE;
+    }
+    if (totalUs > (IR_REPLAY_MAX_TOTAL_US - durationUs)) {
+      __enable_irq();
+#ifdef MEDIUM_DEBUG
+      printf("[modules] [ir] ERROR: replay excede %luus\r\n",
+             (unsigned long)IR_REPLAY_MAX_TOTAL_US);
+#endif
+      irTxOff();
+      return FALSE;
+    }
+    totalUs += durationUs;
+
+    if (level == 0U) {
+      irSendMark(durationUs);
+    } else {
+      irSendSpace(durationUs);
+    }
+    level = (uint8_t)!level;
+  }
+  __enable_irq();
+
+  irTxOff();
+
+#ifdef MEDIUM_DEBUG
+  printf("[modules] [ir] Replay desde .sig OK\r\n");
 #endif
   return TRUE;
 }

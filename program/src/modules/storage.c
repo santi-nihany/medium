@@ -298,6 +298,65 @@ bool_t storageProbe(void) {
   return FALSE;
 }
 
+/// Verifica si un archivo existe en microSD.
+bool_t storageFileExists(const char *path) {
+  char fullPath[STORAGE_PATH_MAX_LEN];
+  FILINFO info;
+  FRESULT result;
+
+  if (path == NULL) {
+    return FALSE;
+  }
+  if (!storageEnsureReady()) {
+    return FALSE;
+  }
+  if (!storageNormalizePath(path, fullPath, sizeof(fullPath))) {
+    return FALSE;
+  }
+
+  result = f_stat(fullPath, &info);
+  return (result == FR_OK) ? TRUE : FALSE;
+}
+
+/// Elimina un archivo de microSD.
+bool_t storageFileDelete(const char *path) {
+  char fullPath[STORAGE_PATH_MAX_LEN];
+  FRESULT result;
+
+  if (path == NULL) {
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [storage] ERROR: delete con path NULL\r\n");
+#endif
+    return FALSE;
+  }
+  if (!storageEnsureReady()) {
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [storage] ERROR: delete sin SD lista\r\n");
+#endif
+    return FALSE;
+  }
+  if (!storageNormalizePath(path, fullPath, sizeof(fullPath))) {
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [storage] ERROR: path invalido para delete: %s\r\n", path);
+#endif
+    return FALSE;
+  }
+
+  result = f_unlink(fullPath);
+  if (result == FR_OK) {
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [storage] Delete OK: %s\r\n", fullPath);
+#endif
+    return TRUE;
+  }
+
+#ifdef MEDIUM_DEBUG
+  printf("[modules] [storage] ERROR: f_unlink(%s)=%u\r\n", fullPath,
+         (unsigned)result);
+#endif
+  return FALSE;
+}
+
 /// Guarda un .sig en microSD mediante FatFs.
 bool_t storageSigSave(const char *path, const sigRecord_t *record) {
   char fullPath[STORAGE_PATH_MAX_LEN];

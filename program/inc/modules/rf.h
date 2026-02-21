@@ -28,6 +28,8 @@ bool_t rfCapture315MHz(void);
 bool_t rfCapture315MHzWithCancel(rfCancelCallback_t cancelCallback,
                                  void *context);
 bool_t rfReplayCaptured(void);
+bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
+                     uint8_t startLevel, int8_t tickScale);
 bool_t rfHasCapture(void);
 bool_t rfGetLastCapture(const uint16_t **pulsesUs, uint16_t *count,
                         bool_t *firstLevel);

@@ -24,7 +24,11 @@ typedef bool_t (*irCancelCallback_t)(void *context);
 void irInit(void);
 bool_t irRecord(void);
 bool_t irRecordWithCancel(irCancelCallback_t cancelCallback, void *context);
+bool_t irRecordNoStartTimeoutWithCancel(irCancelCallback_t cancelCallback,
+                                        void *context);
 bool_t irReplay(void);
+bool_t irReplayEdges(const uint32_t *edges, uint32_t edgeCount,
+                     uint8_t startLevel, int8_t tickScale);
 bool_t irGetLastCapture(const IRPulse **pulses, uint16_t *count);
 bool_t irDecodeNec(const IRPulse *pulses, uint16_t count, uint8_t *address,
                    uint8_t *command);

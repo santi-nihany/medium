@@ -15,6 +15,8 @@ bool_t storageInit(void);
 void storageUpdate(void);
 bool_t storageIsReady(void);
 bool_t storageProbe(void);
+bool_t storageFileExists(const char *path);
+bool_t storageFileDelete(const char *path);
 bool_t storageSigSave(const char *path, const sigRecord_t *record);
 bool_t storageSigLoad(const char *path, sigRecordBuffer_t *record);
 

@@ -16,16 +16,23 @@ typedef struct {
   const uint8_t *image;
 } Sprite;
 
+typedef struct {
+  uint8_t firstChar;
+  uint8_t lastChar;
+  const Sprite *sprites;
+} SpriteFont;
+
 extern const Sprite sprite_background;
 extern const Sprite sprite_title;
 extern const Sprite sprite_ir;
 extern const Sprite sprite_rf;
 extern const Sprite sprite_lselector;
 extern const Sprite sprite_rselector;
+extern const Sprite sprite_record;
+extern const Sprite sprite_play;
+extern const Sprite sprite_delete;
 
-#define ASEPRITE_MINI_START 0x20
-#define ASEPRITE_MINI_END 0x7a
-
-extern const Sprite aseprite_mini[ASEPRITE_MINI_END - ASEPRITE_MINI_START + 1];
+extern const SpriteFont aseprite_font;
+extern const SpriteFont aseprite_mini;
 
 #endif

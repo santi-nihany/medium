@@ -191,24 +191,947 @@ const Sprite sprite_rselector = {
     .image = sprite_rselector_image,
 };
 
+// array size is 7
+static const uint8_t sprite_record_image[] = {
+    0x00, 0x1c, 0x3e, 0x3e, 0x3e, 0x1c, 0x00,
+};
+
+const Sprite sprite_record = {
+    .width = 7,
+    .height = 7,
+    .image = sprite_record_image,
+};
+
+// array size is 7
+static const uint8_t sprite_play_image[] = {
+    0x00, 0x00, 0x3e, 0x1c, 0x08, 0x00, 0x00,
+};
+
+const Sprite sprite_play = {
+    .width = 7,
+    .height = 7,
+    .image = sprite_play_image,
+};
+
+// array size is 7
+static const uint8_t sprite_delete_image[] = {
+    0x00, 0x00, 0x14, 0x08, 0x14, 0x00, 0x00,
+};
+
+const Sprite sprite_delete = {
+    .width = 7,
+    .height = 7,
+    .image = sprite_delete_image,
+};
+
+// Aseprite normal font:
+// https://github.com/aseprite/aseprite/blob/efc30e24a55a01d0666358a0475af4e43fd7e2d2/data/fonts/aseprite_font.png
+
+static const uint8_t aseprite_font_20[] = {
+    0x00, 0x00, 0x00, 0x00,
+};
+static const uint8_t aseprite_font_21[] = {
+    0x5f, 0x00,
+};
+static const uint8_t aseprite_font_22[] = {
+    0x07, 0x00, 0x07, 0x00,
+};
+static const uint8_t aseprite_font_23[] = {
+    0x14, 0x3e, 0x14, 0x3e, 0x14, 0x00,
+};
+static const uint8_t aseprite_font_24[] = {
+    0x24, 0x2a, 0x6b, 0x12, 0x00,
+};
+static const uint8_t aseprite_font_25[] = {
+    0x26, 0x16, 0x08, 0x34, 0x32, 0x00,
+};
+static const uint8_t aseprite_font_26[] = {
+    0x36, 0x49, 0x56, 0x20, 0x50, 0x00,
+};
+static const uint8_t aseprite_font_27[] = {
+    0x04, 0x03, 0x00,
+};
+static const uint8_t aseprite_font_28[] = {
+    0x3e, 0x41, 0x00,
+};
+static const uint8_t aseprite_font_29[] = {
+    0x41, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_2a[] = {
+    0x08, 0x2a, 0x1c, 0x2a, 0x08, 0x00,
+};
+static const uint8_t aseprite_font_2b[] = {
+    0x08, 0x08, 0x3e, 0x08, 0x08, 0x00,
+};
+static const uint8_t aseprite_font_2c[] = {
+    0x40, 0x30, 0x00,
+};
+static const uint8_t aseprite_font_2d[] = {
+    0x08, 0x08, 0x08, 0x00,
+};
+static const uint8_t aseprite_font_2e[] = {
+    0x20, 0x00,
+};
+static const uint8_t aseprite_font_2f[] = {
+    0x60, 0x1c, 0x03, 0x00,
+};
+static const uint8_t aseprite_font_30[] = {
+    0x1e, 0x21, 0x21, 0x1e, 0x00,
+};
+static const uint8_t aseprite_font_31[] = {
+    0x02, 0x3f, 0x00,
+};
+static const uint8_t aseprite_font_32[] = {
+    0x31, 0x29, 0x29, 0x26, 0x00,
+};
+static const uint8_t aseprite_font_33[] = {
+    0x21, 0x25, 0x25, 0x1a, 0x00,
+};
+static const uint8_t aseprite_font_34[] = {
+    0x0c, 0x0a, 0x3d, 0x08, 0x00,
+};
+static const uint8_t aseprite_font_35[] = {
+    0x27, 0x25, 0x25, 0x18, 0x00,
+};
+static const uint8_t aseprite_font_36[] = {
+    0x1e, 0x25, 0x25, 0x18, 0x00,
+};
+static const uint8_t aseprite_font_37[] = {
+    0x01, 0x31, 0x0d, 0x03, 0x00,
+};
+static const uint8_t aseprite_font_38[] = {
+    0x1a, 0x25, 0x25, 0x1a, 0x00,
+};
+static const uint8_t aseprite_font_39[] = {
+    0x06, 0x29, 0x29, 0x1e, 0x00,
+};
+static const uint8_t aseprite_font_3a[] = {
+    0x22, 0x00,
+};
+static const uint8_t aseprite_font_3b[] = {
+    0x40, 0x32, 0x00,
+};
+static const uint8_t aseprite_font_3c[] = {
+    0x08, 0x14, 0x22, 0x00,
+};
+static const uint8_t aseprite_font_3d[] = {
+    0x14, 0x14, 0x14, 0x14, 0x00,
+};
+static const uint8_t aseprite_font_3e[] = {
+    0x22, 0x14, 0x08, 0x00,
+};
+static const uint8_t aseprite_font_3f[] = {
+    0x02, 0x01, 0x29, 0x06, 0x00,
+};
+static const uint8_t aseprite_font_40[] = {
+    0x3c, 0x42, 0x19, 0x25, 0x25, 0x79, 0x42, 0x3c, 0x00,
+};
+static const uint8_t aseprite_font_41[] = {
+    0x3e, 0x09, 0x09, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_42[] = {
+    0x3f, 0x25, 0x25, 0x1a, 0x00,
+};
+static const uint8_t aseprite_font_43[] = {
+    0x1e, 0x21, 0x21, 0x21, 0x00,
+};
+static const uint8_t aseprite_font_44[] = {
+    0x3f, 0x21, 0x21, 0x1e, 0x00,
+};
+static const uint8_t aseprite_font_45[] = {
+    0x3f, 0x25, 0x25, 0x21, 0x00,
+};
+static const uint8_t aseprite_font_46[] = {
+    0x3f, 0x05, 0x05, 0x01, 0x00,
+};
+static const uint8_t aseprite_font_47[] = {
+    0x1e, 0x21, 0x25, 0x3d, 0x00,
+};
+static const uint8_t aseprite_font_48[] = {
+    0x3f, 0x04, 0x04, 0x3f, 0x00,
+};
+static const uint8_t aseprite_font_49[] = {
+    0x3f, 0x00,
+};
+static const uint8_t aseprite_font_4a[] = {
+    0x20, 0x1f, 0x00,
+};
+static const uint8_t aseprite_font_4b[] = {
+    0x3f, 0x0c, 0x12, 0x21, 0x00,
+};
+static const uint8_t aseprite_font_4c[] = {
+    0x3f, 0x20, 0x20, 0x20, 0x00,
+};
+static const uint8_t aseprite_font_4d[] = {
+    0x3f, 0x02, 0x04, 0x02, 0x3f, 0x00,
+};
+static const uint8_t aseprite_font_4e[] = {
+    0x3f, 0x02, 0x04, 0x3f, 0x00,
+};
+static const uint8_t aseprite_font_4f[] = {
+    0x1e, 0x21, 0x21, 0x21, 0x1e, 0x00,
+};
+static const uint8_t aseprite_font_50[] = {
+    0x3f, 0x09, 0x09, 0x06, 0x00,
+};
+static const uint8_t aseprite_font_51[] = {
+    0x1e, 0x21, 0x21, 0x61, 0x5e, 0x00,
+};
+static const uint8_t aseprite_font_52[] = {
+    0x3f, 0x09, 0x09, 0x36, 0x00,
+};
+static const uint8_t aseprite_font_53[] = {
+    0x22, 0x25, 0x25, 0x19, 0x00,
+};
+static const uint8_t aseprite_font_54[] = {
+    0x01, 0x01, 0x3f, 0x01, 0x01, 0x00,
+};
+static const uint8_t aseprite_font_55[] = {
+    0x1f, 0x20, 0x20, 0x1f, 0x00,
+};
+static const uint8_t aseprite_font_56[] = {
+    0x0f, 0x10, 0x20, 0x10, 0x0f, 0x00,
+};
+static const uint8_t aseprite_font_57[] = {
+    0x0f, 0x10, 0x20, 0x1c, 0x20, 0x10, 0x0f, 0x00,
+};
+static const uint8_t aseprite_font_58[] = {
+    0x21, 0x12, 0x0c, 0x12, 0x21, 0x00,
+};
+static const uint8_t aseprite_font_59[] = {
+    0x03, 0x04, 0x38, 0x04, 0x03, 0x00,
+};
+static const uint8_t aseprite_font_5a[] = {
+    0x31, 0x29, 0x25, 0x23, 0x00,
+};
+static const uint8_t aseprite_font_5b[] = {
+    0x7f, 0x41, 0x00,
+};
+static const uint8_t aseprite_font_5c[] = {
+    0x03, 0x1c, 0x60, 0x00,
+};
+static const uint8_t aseprite_font_5d[] = {
+    0x41, 0x7f, 0x00,
+};
+static const uint8_t aseprite_font_5e[] = {
+    0x04, 0x02, 0x01, 0x02, 0x04, 0x00,
+};
+static const uint8_t aseprite_font_5f[] = {
+    0x40, 0x40, 0x40, 0x40, 0x40, 0x00,
+};
+static const uint8_t aseprite_font_60[] = {
+    0x01, 0x02, 0x04, 0x00,
+};
+static const uint8_t aseprite_font_61[] = {
+    0x10, 0x2a, 0x2a, 0x3c, 0x00,
+};
+static const uint8_t aseprite_font_62[] = {
+    0x3f, 0x24, 0x24, 0x18, 0x00,
+};
+static const uint8_t aseprite_font_63[] = {
+    0x1c, 0x22, 0x22, 0x22, 0x00,
+};
+static const uint8_t aseprite_font_64[] = {
+    0x18, 0x24, 0x24, 0x3f, 0x00,
+};
+static const uint8_t aseprite_font_65[] = {
+    0x1c, 0x2a, 0x2a, 0x0c, 0x00,
+};
+static const uint8_t aseprite_font_66[] = {
+    0x3e, 0x05, 0x00,
+};
+static const uint8_t aseprite_font_67[] = {
+    0x0c, 0x52, 0x52, 0x3c, 0x00,
+};
+static const uint8_t aseprite_font_68[] = {
+    0x3f, 0x04, 0x04, 0x38, 0x00,
+};
+static const uint8_t aseprite_font_69[] = {
+    0x3d, 0x00,
+};
+static const uint8_t aseprite_font_6a[] = {
+    0x40, 0x3d, 0x00,
+};
+static const uint8_t aseprite_font_6b[] = {
+    0x3f, 0x08, 0x14, 0x22, 0x00,
+};
+static const uint8_t aseprite_font_6c[] = {
+    0x3f, 0x00,
+};
+static const uint8_t aseprite_font_6d[] = {
+    0x3e, 0x02, 0x02, 0x3e, 0x02, 0x02, 0x3c, 0x00,
+};
+static const uint8_t aseprite_font_6e[] = {
+    0x3e, 0x02, 0x02, 0x3c, 0x00,
+};
+static const uint8_t aseprite_font_6f[] = {
+    0x1c, 0x22, 0x22, 0x1c, 0x00,
+};
+static const uint8_t aseprite_font_70[] = {
+    0x7e, 0x12, 0x12, 0x0c, 0x00,
+};
+static const uint8_t aseprite_font_71[] = {
+    0x0c, 0x12, 0x12, 0x7e, 0x00,
+};
+static const uint8_t aseprite_font_72[] = {
+    0x3e, 0x04, 0x02, 0x00,
+};
+static const uint8_t aseprite_font_73[] = {
+    0x24, 0x2a, 0x12, 0x00,
+};
+static const uint8_t aseprite_font_74[] = {
+    0x1f, 0x22, 0x00,
+};
+static const uint8_t aseprite_font_75[] = {
+    0x1e, 0x20, 0x20, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_76[] = {
+    0x0e, 0x10, 0x20, 0x1e, 0x00,
+};
+static const uint8_t aseprite_font_77[] = {
+    0x1e, 0x20, 0x18, 0x20, 0x1e, 0x00,
+};
+static const uint8_t aseprite_font_78[] = {
+    0x22, 0x14, 0x08, 0x14, 0x22, 0x00,
+};
+static const uint8_t aseprite_font_79[] = {
+    0x0e, 0x50, 0x50, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_7a[] = {
+    0x32, 0x2a, 0x26, 0x22, 0x00,
+};
+static const uint8_t aseprite_font_7b[] = {
+    0x08, 0x36, 0x41, 0x00,
+};
+static const uint8_t aseprite_font_7c[] = {
+    0x7f, 0x00,
+};
+static const uint8_t aseprite_font_7d[] = {
+    0x41, 0x36, 0x08, 0x00,
+};
+static const uint8_t aseprite_font_7e[] = {
+    0x02, 0x01, 0x02, 0x01, 0x00,
+};
+static const uint8_t aseprite_font_7f[] = {
+    0x38, 0x24, 0x22, 0x24, 0x38, 0x00,
+};
+static const uint8_t aseprite_font_80[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_81[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_82[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_83[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_84[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_85[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_86[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_87[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_88[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_89[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_8a[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_8b[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_8c[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_8d[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_8e[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_8f[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_90[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_91[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_92[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_93[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_94[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_95[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_96[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_97[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_98[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_99[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_9a[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_9b[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_9c[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_9d[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_9e[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_9f[] = {
+    0x3e, 0x22, 0x22, 0x22, 0x3e, 0x00,
+};
+static const uint8_t aseprite_font_a0[] = {
+    0x00, 0x00, 0x00, 0x00,
+};
+static const uint8_t aseprite_font_a1[] = {
+    0x7d, 0x00,
+};
+static const uint8_t aseprite_font_a2[] = {
+    0x18, 0x64, 0x3c, 0x26, 0x00,
+};
+static const uint8_t aseprite_font_a3[] = {
+    0x28, 0x3e, 0x29, 0x21, 0x22, 0x00,
+};
+static const uint8_t aseprite_font_a4[] = {
+    0x22, 0x1c, 0x14, 0x1c, 0x22, 0x00,
+};
+static const uint8_t aseprite_font_a5[] = {
+    0x01, 0x2a, 0x7c, 0x2a, 0x01, 0x00,
+};
+static const uint8_t aseprite_font_a6[] = {
+    0x77, 0x00,
+};
+static const uint8_t aseprite_font_a7[] = {
+    0x4c, 0x56, 0x35, 0x19, 0x00,
+};
+static const uint8_t aseprite_font_a8[] = {
+    0x00, 0x01, 0x00, 0x01, 0x00,
+};
+static const uint8_t aseprite_font_a9[] = {
+    0x1c, 0x22, 0x5d, 0x55, 0x22, 0x1c, 0x00,
+};
+static const uint8_t aseprite_font_aa[] = {
+    0x55, 0x55, 0x4e, 0x00,
+};
+static const uint8_t aseprite_font_ab[] = {
+    0x08, 0x14, 0x00, 0x08, 0x14, 0x00,
+};
+static const uint8_t aseprite_font_ac[] = {
+    0x08, 0x08, 0x08, 0x18, 0x00,
+};
+static const uint8_t aseprite_font_ad[] = {
+    0x00,
+};
+static const uint8_t aseprite_font_ae[] = {
+    0x1c, 0x22, 0x5d, 0x4d, 0x32, 0x1c,
+};
+static const uint8_t aseprite_font_af[] = {
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x00,
+};
+static const uint8_t aseprite_font_b0[] = {
+    0x06, 0x09, 0x09, 0x06, 0x00,
+};
+static const uint8_t aseprite_font_b1[] = {
+    0x44, 0x44, 0x5f, 0x44, 0x44, 0x00,
+};
+static const uint8_t aseprite_font_b2[] = {
+    0x19, 0x15, 0x12, 0x00,
+};
+static const uint8_t aseprite_font_b3[] = {
+    0x11, 0x15, 0x0a, 0x00,
+};
+static const uint8_t aseprite_font_b4[] = {
+    0x04, 0x02, 0x01, 0x00,
+};
+static const uint8_t aseprite_font_b5[] = {
+    0x7e, 0x10, 0x10, 0x0e, 0x10, 0x00,
+};
+static const uint8_t aseprite_font_b6[] = {
+    0x07, 0x7f, 0x01, 0x7f, 0x00,
+};
+static const uint8_t aseprite_font_b7[] = {
+    0x00, 0x08, 0x00,
+};
+static const uint8_t aseprite_font_b8[] = {
+    0x20, 0x28, 0x30, 0x00,
+};
+static const uint8_t aseprite_font_b9[] = {
+    0x12, 0x1f, 0x10, 0x00,
+};
+static const uint8_t aseprite_font_ba[] = {
+    0x29, 0x29, 0x26, 0x00,
+};
+static const uint8_t aseprite_font_bb[] = {
+    0x14, 0x08, 0x00, 0x14, 0x08, 0x00,
+};
+static const uint8_t aseprite_font_bc[] = {
+    0x17, 0x08, 0x34, 0x2a, 0x78, 0x00,
+};
+static const uint8_t aseprite_font_bd[] = {
+    0x17, 0x08, 0x04, 0x4a, 0x68, 0x50, 0x00,
+};
+static const uint8_t aseprite_font_be[] = {
+    0x55, 0x2a, 0x10, 0x08, 0x34, 0x28, 0x78, 0x00,
+};
+static const uint8_t aseprite_font_bf[] = {
+    0x30, 0x4a, 0x40, 0x20, 0x00,
+};
+static const uint8_t aseprite_font_c0[] = {
+    0x3d, 0x0a, 0x0a, 0x3c, 0x00,
+};
+static const uint8_t aseprite_font_c1[] = {
+    0x3c, 0x0a, 0x0a, 0x3d, 0x00,
+};
+static const uint8_t aseprite_font_c2[] = {
+    0x72, 0x29, 0x29, 0x72, 0x00,
+};
+static const uint8_t aseprite_font_c3[] = {
+    0x72, 0x29, 0x2a, 0x71, 0x00,
+};
+static const uint8_t aseprite_font_c4[] = {
+    0x79, 0x24, 0x24, 0x79, 0x00,
+};
+static const uint8_t aseprite_font_c5[] = {
+    0x70, 0x2a, 0x2d, 0x72, 0x00,
+};
+static const uint8_t aseprite_font_c6[] = {
+    0x3e, 0x09, 0x3f, 0x25, 0x25, 0x00,
+};
+static const uint8_t aseprite_font_c7[] = {
+    0x1e, 0x21, 0x61, 0x21, 0x00,
+};
+static const uint8_t aseprite_font_c8[] = {
+    0x7d, 0x56, 0x54, 0x44, 0x00,
+};
+static const uint8_t aseprite_font_c9[] = {
+    0x7c, 0x56, 0x55, 0x44, 0x00,
+};
+static const uint8_t aseprite_font_ca[] = {
+    0x7c, 0x56, 0x55, 0x46, 0x00,
+};
+static const uint8_t aseprite_font_cb[] = {
+    0x7c, 0x55, 0x54, 0x45, 0x00,
+};
+static const uint8_t aseprite_font_cc[] = {
+    0x49, 0x7a, 0x48, 0x00,
+};
+static const uint8_t aseprite_font_cd[] = {
+    0x48, 0x7a, 0x49, 0x00,
+};
+static const uint8_t aseprite_font_ce[] = {
+    0x4a, 0x79, 0x4a, 0x00,
+};
+static const uint8_t aseprite_font_cf[] = {
+    0x25, 0x3c, 0x25, 0x00,
+};
+static const uint8_t aseprite_font_d0[] = {
+    0x04, 0x3f, 0x25, 0x21, 0x1e, 0x00,
+};
+static const uint8_t aseprite_font_d1[] = {
+    0x3a, 0x09, 0x12, 0x39, 0x00,
+};
+static const uint8_t aseprite_font_d2[] = {
+    0x38, 0x45, 0x46, 0x44, 0x38, 0x00,
+};
+static const uint8_t aseprite_font_d3[] = {
+    0x38, 0x44, 0x46, 0x45, 0x38, 0x00,
+};
+static const uint8_t aseprite_font_d4[] = {
+    0x30, 0x4a, 0x49, 0x4a, 0x30, 0x00,
+};
+static const uint8_t aseprite_font_d5[] = {
+    0x32, 0x49, 0x4a, 0x49, 0x30, 0x00,
+};
+static const uint8_t aseprite_font_d6[] = {
+    0x38, 0x45, 0x44, 0x45, 0x38, 0x00,
+};
+static const uint8_t aseprite_font_d7[] = {
+    0x22, 0x14, 0x08, 0x14, 0x22, 0x00,
+};
+static const uint8_t aseprite_font_d8[] = {
+    0x2c, 0x12, 0x29, 0x25, 0x12, 0x0d, 0x00,
+};
+static const uint8_t aseprite_font_d9[] = {
+    0x3d, 0x42, 0x40, 0x3c, 0x00,
+};
+static const uint8_t aseprite_font_da[] = {
+    0x3c, 0x40, 0x42, 0x3d, 0x00,
+};
+static const uint8_t aseprite_font_db[] = {
+    0x38, 0x42, 0x41, 0x3a, 0x00,
+};
+static const uint8_t aseprite_font_dc[] = {
+    0x3d, 0x40, 0x40, 0x3d, 0x00,
+};
+static const uint8_t aseprite_font_dd[] = {
+    0x04, 0x08, 0x72, 0x09, 0x04, 0x00,
+};
+static const uint8_t aseprite_font_de[] = {
+    0x41, 0x7f, 0x55, 0x1c, 0x00,
+};
+static const uint8_t aseprite_font_df[] = {
+    0x7f, 0x15, 0x15, 0x0a, 0x00,
+};
+static const uint8_t aseprite_font_e0[] = {
+    0x20, 0x55, 0x56, 0x78, 0x00,
+};
+static const uint8_t aseprite_font_e1[] = {
+    0x20, 0x54, 0x56, 0x79, 0x00,
+};
+static const uint8_t aseprite_font_e2[] = {
+    0x22, 0x55, 0x55, 0x7a, 0x00,
+};
+static const uint8_t aseprite_font_e3[] = {
+    0x22, 0x55, 0x56, 0x79, 0x00,
+};
+static const uint8_t aseprite_font_e4[] = {
+    0x21, 0x54, 0x54, 0x79, 0x00,
+};
+static const uint8_t aseprite_font_e5[] = {
+    0x20, 0x54, 0x55, 0x78, 0x00,
+};
+static const uint8_t aseprite_font_e6[] = {
+    0x10, 0x2a, 0x1c, 0x2a, 0x2c, 0x00,
+};
+static const uint8_t aseprite_font_e7[] = {
+    0x0c, 0x52, 0x32, 0x12, 0x00,
+};
+static const uint8_t aseprite_font_e8[] = {
+    0x39, 0x56, 0x54, 0x18, 0x00,
+};
+static const uint8_t aseprite_font_e9[] = {
+    0x38, 0x54, 0x56, 0x19, 0x00,
+};
+static const uint8_t aseprite_font_ea[] = {
+    0x3a, 0x55, 0x55, 0x1a, 0x00,
+};
+static const uint8_t aseprite_font_eb[] = {
+    0x39, 0x54, 0x54, 0x19, 0x00,
+};
+static const uint8_t aseprite_font_ec[] = {
+    0x01, 0x3a, 0x00,
+};
+static const uint8_t aseprite_font_ed[] = {
+    0x3a, 0x01, 0x00,
+};
+static const uint8_t aseprite_font_ee[] = {
+    0x02, 0x39, 0x02, 0x00,
+};
+static const uint8_t aseprite_font_ef[] = {
+    0x02, 0x38, 0x02, 0x00,
+};
+static const uint8_t aseprite_font_f0[] = {
+    0x30, 0x4a, 0x4b, 0x3e, 0x02, 0x00,
+};
+static const uint8_t aseprite_font_f1[] = {
+    0x3a, 0x09, 0x0a, 0x31, 0x00,
+};
+static const uint8_t aseprite_font_f2[] = {
+    0x18, 0x25, 0x26, 0x18, 0x00,
+};
+static const uint8_t aseprite_font_f3[] = {
+    0x18, 0x24, 0x26, 0x19, 0x00,
+};
+static const uint8_t aseprite_font_f4[] = {
+    0x32, 0x49, 0x49, 0x32, 0x00,
+};
+static const uint8_t aseprite_font_f5[] = {
+    0x32, 0x49, 0x4a, 0x31, 0x00,
+};
+static const uint8_t aseprite_font_f6[] = {
+    0x19, 0x24, 0x24, 0x19, 0x00,
+};
+static const uint8_t aseprite_font_f7[] = {
+    0x08, 0x08, 0x2a, 0x08, 0x08, 0x00,
+};
+static const uint8_t aseprite_font_f8[] = {
+    0x40, 0x38, 0x34, 0x2c, 0x1c, 0x02, 0x00,
+};
+static const uint8_t aseprite_font_f9[] = {
+    0x1d, 0x22, 0x20, 0x3c, 0x00,
+};
+static const uint8_t aseprite_font_fa[] = {
+    0x1c, 0x20, 0x22, 0x3d, 0x00,
+};
+static const uint8_t aseprite_font_fb[] = {
+    0x38, 0x42, 0x41, 0x7a, 0x00,
+};
+static const uint8_t aseprite_font_fc[] = {
+    0x1d, 0x20, 0x20, 0x3d, 0x00,
+};
+
+static const Sprite aseprite_font_sprites[] = {
+    {.width = 4, .height = 7, .image = aseprite_font_20},
+    {.width = 2, .height = 7, .image = aseprite_font_21},
+    {.width = 4, .height = 7, .image = aseprite_font_22},
+    {.width = 6, .height = 7, .image = aseprite_font_23},
+    {.width = 5, .height = 7, .image = aseprite_font_24},
+    {.width = 6, .height = 7, .image = aseprite_font_25},
+    {.width = 6, .height = 7, .image = aseprite_font_26},
+    {.width = 3, .height = 7, .image = aseprite_font_27},
+    {.width = 3, .height = 7, .image = aseprite_font_28},
+    {.width = 3, .height = 7, .image = aseprite_font_29},
+    {.width = 6, .height = 7, .image = aseprite_font_2a},
+    {.width = 6, .height = 7, .image = aseprite_font_2b},
+    {.width = 3, .height = 7, .image = aseprite_font_2c},
+    {.width = 4, .height = 7, .image = aseprite_font_2d},
+    {.width = 2, .height = 7, .image = aseprite_font_2e},
+    {.width = 4, .height = 7, .image = aseprite_font_2f},
+    {.width = 5, .height = 7, .image = aseprite_font_30},
+    {.width = 3, .height = 7, .image = aseprite_font_31},
+    {.width = 5, .height = 7, .image = aseprite_font_32},
+    {.width = 5, .height = 7, .image = aseprite_font_33},
+    {.width = 5, .height = 7, .image = aseprite_font_34},
+    {.width = 5, .height = 7, .image = aseprite_font_35},
+    {.width = 5, .height = 7, .image = aseprite_font_36},
+    {.width = 5, .height = 7, .image = aseprite_font_37},
+    {.width = 5, .height = 7, .image = aseprite_font_38},
+    {.width = 5, .height = 7, .image = aseprite_font_39},
+    {.width = 2, .height = 7, .image = aseprite_font_3a},
+    {.width = 3, .height = 7, .image = aseprite_font_3b},
+    {.width = 4, .height = 7, .image = aseprite_font_3c},
+    {.width = 5, .height = 7, .image = aseprite_font_3d},
+    {.width = 4, .height = 7, .image = aseprite_font_3e},
+    {.width = 5, .height = 7, .image = aseprite_font_3f},
+    {.width = 9, .height = 7, .image = aseprite_font_40},
+    {.width = 5, .height = 7, .image = aseprite_font_41},
+    {.width = 5, .height = 7, .image = aseprite_font_42},
+    {.width = 5, .height = 7, .image = aseprite_font_43},
+    {.width = 5, .height = 7, .image = aseprite_font_44},
+    {.width = 5, .height = 7, .image = aseprite_font_45},
+    {.width = 5, .height = 7, .image = aseprite_font_46},
+    {.width = 5, .height = 7, .image = aseprite_font_47},
+    {.width = 5, .height = 7, .image = aseprite_font_48},
+    {.width = 2, .height = 7, .image = aseprite_font_49},
+    {.width = 3, .height = 7, .image = aseprite_font_4a},
+    {.width = 5, .height = 7, .image = aseprite_font_4b},
+    {.width = 5, .height = 7, .image = aseprite_font_4c},
+    {.width = 6, .height = 7, .image = aseprite_font_4d},
+    {.width = 5, .height = 7, .image = aseprite_font_4e},
+    {.width = 6, .height = 7, .image = aseprite_font_4f},
+    {.width = 5, .height = 7, .image = aseprite_font_50},
+    {.width = 6, .height = 7, .image = aseprite_font_51},
+    {.width = 5, .height = 7, .image = aseprite_font_52},
+    {.width = 5, .height = 7, .image = aseprite_font_53},
+    {.width = 6, .height = 7, .image = aseprite_font_54},
+    {.width = 5, .height = 7, .image = aseprite_font_55},
+    {.width = 6, .height = 7, .image = aseprite_font_56},
+    {.width = 8, .height = 7, .image = aseprite_font_57},
+    {.width = 6, .height = 7, .image = aseprite_font_58},
+    {.width = 6, .height = 7, .image = aseprite_font_59},
+    {.width = 5, .height = 7, .image = aseprite_font_5a},
+    {.width = 3, .height = 7, .image = aseprite_font_5b},
+    {.width = 4, .height = 7, .image = aseprite_font_5c},
+    {.width = 3, .height = 7, .image = aseprite_font_5d},
+    {.width = 6, .height = 7, .image = aseprite_font_5e},
+    {.width = 6, .height = 7, .image = aseprite_font_5f},
+    {.width = 4, .height = 7, .image = aseprite_font_60},
+    {.width = 5, .height = 7, .image = aseprite_font_61},
+    {.width = 5, .height = 7, .image = aseprite_font_62},
+    {.width = 5, .height = 7, .image = aseprite_font_63},
+    {.width = 5, .height = 7, .image = aseprite_font_64},
+    {.width = 5, .height = 7, .image = aseprite_font_65},
+    {.width = 3, .height = 7, .image = aseprite_font_66},
+    {.width = 5, .height = 7, .image = aseprite_font_67},
+    {.width = 5, .height = 7, .image = aseprite_font_68},
+    {.width = 2, .height = 7, .image = aseprite_font_69},
+    {.width = 3, .height = 7, .image = aseprite_font_6a},
+    {.width = 5, .height = 7, .image = aseprite_font_6b},
+    {.width = 2, .height = 7, .image = aseprite_font_6c},
+    {.width = 8, .height = 7, .image = aseprite_font_6d},
+    {.width = 5, .height = 7, .image = aseprite_font_6e},
+    {.width = 5, .height = 7, .image = aseprite_font_6f},
+    {.width = 5, .height = 7, .image = aseprite_font_70},
+    {.width = 5, .height = 7, .image = aseprite_font_71},
+    {.width = 4, .height = 7, .image = aseprite_font_72},
+    {.width = 4, .height = 7, .image = aseprite_font_73},
+    {.width = 3, .height = 7, .image = aseprite_font_74},
+    {.width = 5, .height = 7, .image = aseprite_font_75},
+    {.width = 5, .height = 7, .image = aseprite_font_76},
+    {.width = 6, .height = 7, .image = aseprite_font_77},
+    {.width = 6, .height = 7, .image = aseprite_font_78},
+    {.width = 5, .height = 7, .image = aseprite_font_79},
+    {.width = 5, .height = 7, .image = aseprite_font_7a},
+    {.width = 4, .height = 7, .image = aseprite_font_7b},
+    {.width = 2, .height = 7, .image = aseprite_font_7c},
+    {.width = 4, .height = 7, .image = aseprite_font_7d},
+    {.width = 5, .height = 7, .image = aseprite_font_7e},
+    {.width = 6, .height = 7, .image = aseprite_font_7f},
+    {.width = 6, .height = 7, .image = aseprite_font_80},
+    {.width = 6, .height = 7, .image = aseprite_font_81},
+    {.width = 6, .height = 7, .image = aseprite_font_82},
+    {.width = 6, .height = 7, .image = aseprite_font_83},
+    {.width = 6, .height = 7, .image = aseprite_font_84},
+    {.width = 6, .height = 7, .image = aseprite_font_85},
+    {.width = 6, .height = 7, .image = aseprite_font_86},
+    {.width = 6, .height = 7, .image = aseprite_font_87},
+    {.width = 6, .height = 7, .image = aseprite_font_88},
+    {.width = 6, .height = 7, .image = aseprite_font_89},
+    {.width = 6, .height = 7, .image = aseprite_font_8a},
+    {.width = 6, .height = 7, .image = aseprite_font_8b},
+    {.width = 6, .height = 7, .image = aseprite_font_8c},
+    {.width = 6, .height = 7, .image = aseprite_font_8d},
+    {.width = 6, .height = 7, .image = aseprite_font_8e},
+    {.width = 6, .height = 7, .image = aseprite_font_8f},
+    {.width = 6, .height = 7, .image = aseprite_font_90},
+    {.width = 6, .height = 7, .image = aseprite_font_91},
+    {.width = 6, .height = 7, .image = aseprite_font_92},
+    {.width = 6, .height = 7, .image = aseprite_font_93},
+    {.width = 6, .height = 7, .image = aseprite_font_94},
+    {.width = 6, .height = 7, .image = aseprite_font_95},
+    {.width = 6, .height = 7, .image = aseprite_font_96},
+    {.width = 6, .height = 7, .image = aseprite_font_97},
+    {.width = 6, .height = 7, .image = aseprite_font_98},
+    {.width = 6, .height = 7, .image = aseprite_font_99},
+    {.width = 6, .height = 7, .image = aseprite_font_9a},
+    {.width = 6, .height = 7, .image = aseprite_font_9b},
+    {.width = 6, .height = 7, .image = aseprite_font_9c},
+    {.width = 6, .height = 7, .image = aseprite_font_9d},
+    {.width = 6, .height = 7, .image = aseprite_font_9e},
+    {.width = 6, .height = 7, .image = aseprite_font_9f},
+    {.width = 4, .height = 7, .image = aseprite_font_a0},
+    {.width = 2, .height = 7, .image = aseprite_font_a1},
+    {.width = 5, .height = 7, .image = aseprite_font_a2},
+    {.width = 6, .height = 7, .image = aseprite_font_a3},
+    {.width = 6, .height = 7, .image = aseprite_font_a4},
+    {.width = 6, .height = 7, .image = aseprite_font_a5},
+    {.width = 2, .height = 7, .image = aseprite_font_a6},
+    {.width = 5, .height = 7, .image = aseprite_font_a7},
+    {.width = 5, .height = 7, .image = aseprite_font_a8},
+    {.width = 7, .height = 7, .image = aseprite_font_a9},
+    {.width = 4, .height = 7, .image = aseprite_font_aa},
+    {.width = 6, .height = 7, .image = aseprite_font_ab},
+    {.width = 5, .height = 7, .image = aseprite_font_ac},
+    {.width = 1, .height = 7, .image = aseprite_font_ad},
+    {.width = 6, .height = 7, .image = aseprite_font_ae},
+    {.width = 6, .height = 7, .image = aseprite_font_af},
+    {.width = 5, .height = 7, .image = aseprite_font_b0},
+    {.width = 6, .height = 7, .image = aseprite_font_b1},
+    {.width = 4, .height = 7, .image = aseprite_font_b2},
+    {.width = 4, .height = 7, .image = aseprite_font_b3},
+    {.width = 4, .height = 7, .image = aseprite_font_b4},
+    {.width = 6, .height = 7, .image = aseprite_font_b5},
+    {.width = 5, .height = 7, .image = aseprite_font_b6},
+    {.width = 3, .height = 7, .image = aseprite_font_b7},
+    {.width = 4, .height = 7, .image = aseprite_font_b8},
+    {.width = 4, .height = 7, .image = aseprite_font_b9},
+    {.width = 4, .height = 7, .image = aseprite_font_ba},
+    {.width = 6, .height = 7, .image = aseprite_font_bb},
+    {.width = 6, .height = 7, .image = aseprite_font_bc},
+    {.width = 7, .height = 7, .image = aseprite_font_bd},
+    {.width = 8, .height = 7, .image = aseprite_font_be},
+    {.width = 5, .height = 7, .image = aseprite_font_bf},
+    {.width = 5, .height = 7, .image = aseprite_font_c0},
+    {.width = 5, .height = 7, .image = aseprite_font_c1},
+    {.width = 5, .height = 7, .image = aseprite_font_c2},
+    {.width = 5, .height = 7, .image = aseprite_font_c3},
+    {.width = 5, .height = 7, .image = aseprite_font_c4},
+    {.width = 5, .height = 7, .image = aseprite_font_c5},
+    {.width = 6, .height = 7, .image = aseprite_font_c6},
+    {.width = 5, .height = 7, .image = aseprite_font_c7},
+    {.width = 5, .height = 7, .image = aseprite_font_c8},
+    {.width = 5, .height = 7, .image = aseprite_font_c9},
+    {.width = 5, .height = 7, .image = aseprite_font_ca},
+    {.width = 5, .height = 7, .image = aseprite_font_cb},
+    {.width = 4, .height = 7, .image = aseprite_font_cc},
+    {.width = 4, .height = 7, .image = aseprite_font_cd},
+    {.width = 4, .height = 7, .image = aseprite_font_ce},
+    {.width = 4, .height = 7, .image = aseprite_font_cf},
+    {.width = 6, .height = 7, .image = aseprite_font_d0},
+    {.width = 5, .height = 7, .image = aseprite_font_d1},
+    {.width = 6, .height = 7, .image = aseprite_font_d2},
+    {.width = 6, .height = 7, .image = aseprite_font_d3},
+    {.width = 6, .height = 7, .image = aseprite_font_d4},
+    {.width = 6, .height = 7, .image = aseprite_font_d5},
+    {.width = 6, .height = 7, .image = aseprite_font_d6},
+    {.width = 6, .height = 7, .image = aseprite_font_d7},
+    {.width = 7, .height = 7, .image = aseprite_font_d8},
+    {.width = 5, .height = 7, .image = aseprite_font_d9},
+    {.width = 5, .height = 7, .image = aseprite_font_da},
+    {.width = 5, .height = 7, .image = aseprite_font_db},
+    {.width = 5, .height = 7, .image = aseprite_font_dc},
+    {.width = 6, .height = 7, .image = aseprite_font_dd},
+    {.width = 5, .height = 7, .image = aseprite_font_de},
+    {.width = 5, .height = 7, .image = aseprite_font_df},
+    {.width = 5, .height = 7, .image = aseprite_font_e0},
+    {.width = 5, .height = 7, .image = aseprite_font_e1},
+    {.width = 5, .height = 7, .image = aseprite_font_e2},
+    {.width = 5, .height = 7, .image = aseprite_font_e3},
+    {.width = 5, .height = 7, .image = aseprite_font_e4},
+    {.width = 5, .height = 7, .image = aseprite_font_e5},
+    {.width = 6, .height = 7, .image = aseprite_font_e6},
+    {.width = 5, .height = 7, .image = aseprite_font_e7},
+    {.width = 5, .height = 7, .image = aseprite_font_e8},
+    {.width = 5, .height = 7, .image = aseprite_font_e9},
+    {.width = 5, .height = 7, .image = aseprite_font_ea},
+    {.width = 5, .height = 7, .image = aseprite_font_eb},
+    {.width = 3, .height = 7, .image = aseprite_font_ec},
+    {.width = 3, .height = 7, .image = aseprite_font_ed},
+    {.width = 4, .height = 7, .image = aseprite_font_ee},
+    {.width = 4, .height = 7, .image = aseprite_font_ef},
+    {.width = 6, .height = 7, .image = aseprite_font_f0},
+    {.width = 5, .height = 7, .image = aseprite_font_f1},
+    {.width = 5, .height = 7, .image = aseprite_font_f2},
+    {.width = 5, .height = 7, .image = aseprite_font_f3},
+    {.width = 5, .height = 7, .image = aseprite_font_f4},
+    {.width = 5, .height = 7, .image = aseprite_font_f5},
+    {.width = 5, .height = 7, .image = aseprite_font_f6},
+    {.width = 6, .height = 7, .image = aseprite_font_f7},
+    {.width = 7, .height = 7, .image = aseprite_font_f8},
+    {.width = 5, .height = 7, .image = aseprite_font_f9},
+    {.width = 5, .height = 7, .image = aseprite_font_fa},
+    {.width = 5, .height = 7, .image = aseprite_font_fb},
+    {.width = 5, .height = 7, .image = aseprite_font_fc},
+};
+
+const SpriteFont aseprite_font = {
+    .sprites = aseprite_font_sprites,
+    .firstChar = 0x20,
+    .lastChar = 0xfc,
+};
+
 // Aseprite mini font:
 // https://github.com/aseprite/aseprite/blob/efc30e24a55a01d0666358a0475af4e43fd7e2d2/data/fonts/aseprite_mini.png
 
 static const uint8_t aseprite_mini_20[] = {
-    0x00,
-    0x00,
-    0x00,
-    0x00,
+    0x00, 0x00, 0x00, 0x00,
 };
 static const uint8_t aseprite_mini_21[] = {
-    0x17,
-    0x00,
+    0x17, 0x00,
 };
 static const uint8_t aseprite_mini_22[] = {
-    0x03,
-    0x00,
-    0x03,
-    0x00,
+    0x03, 0x00, 0x03, 0x00,
 };
 static const uint8_t aseprite_mini_23[] = {
     0x0a, 0x1f, 0x0a, 0x1f, 0x0a, 0x00,
@@ -223,207 +1146,118 @@ static const uint8_t aseprite_mini_26[] = {
     0x0a, 0x15, 0x0a, 0x18, 0x14, 0x00,
 };
 static const uint8_t aseprite_mini_27[] = {
-    0x03,
-    0x00,
+    0x03, 0x00,
 };
 static const uint8_t aseprite_mini_28[] = {
-    0x0e,
-    0x11,
-    0x00,
+    0x0e, 0x11, 0x00,
 };
 static const uint8_t aseprite_mini_29[] = {
-    0x11,
-    0x0e,
-    0x00,
+    0x11, 0x0e, 0x00,
 };
 static const uint8_t aseprite_mini_2a[] = {
-    0x15,
-    0x0e,
-    0x15,
-    0x00,
+    0x15, 0x0e, 0x15, 0x00,
 };
 static const uint8_t aseprite_mini_2b[] = {
-    0x04,
-    0x0e,
-    0x04,
-    0x00,
+    0x04, 0x0e, 0x04, 0x00,
 };
 static const uint8_t aseprite_mini_2c[] = {
-    0x18,
-    0x00,
+    0x18, 0x00,
 };
 static const uint8_t aseprite_mini_2d[] = {
-    0x08,
-    0x08,
-    0x00,
+    0x08, 0x08, 0x00,
 };
 static const uint8_t aseprite_mini_2e[] = {
-    0x08,
-    0x00,
+    0x08, 0x00,
 };
 static const uint8_t aseprite_mini_2f[] = {
-    0x10,
-    0x0c,
-    0x03,
-    0x00,
+    0x10, 0x0c, 0x03, 0x00,
 };
 static const uint8_t aseprite_mini_30[] = {
-    0x0e,
-    0x11,
-    0x0e,
-    0x00,
+    0x0e, 0x11, 0x0e, 0x00,
 };
 static const uint8_t aseprite_mini_31[] = {
-    0x02,
-    0x1f,
-    0x00,
+    0x02, 0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_32[] = {
-    0x19,
-    0x15,
-    0x16,
-    0x00,
+    0x19, 0x15, 0x16, 0x00,
 };
 static const uint8_t aseprite_mini_33[] = {
-    0x11,
-    0x15,
-    0x0a,
-    0x00,
+    0x11, 0x15, 0x0a, 0x00,
 };
 static const uint8_t aseprite_mini_34[] = {
     0x0c, 0x0a, 0x1d, 0x08, 0x00,
 };
 static const uint8_t aseprite_mini_35[] = {
-    0x17,
-    0x15,
-    0x08,
-    0x00,
+    0x17, 0x15, 0x08, 0x00,
 };
 static const uint8_t aseprite_mini_36[] = {
-    0x0e,
-    0x15,
-    0x08,
-    0x00,
+    0x0e, 0x15, 0x08, 0x00,
 };
 static const uint8_t aseprite_mini_37[] = {
-    0x01,
-    0x1d,
-    0x03,
-    0x00,
+    0x01, 0x1d, 0x03, 0x00,
 };
 static const uint8_t aseprite_mini_38[] = {
-    0x0a,
-    0x15,
-    0x0a,
-    0x00,
+    0x0a, 0x15, 0x0a, 0x00,
 };
 static const uint8_t aseprite_mini_39[] = {
-    0x02,
-    0x15,
-    0x0e,
-    0x00,
+    0x02, 0x15, 0x0e, 0x00,
 };
 static const uint8_t aseprite_mini_3a[] = {
-    0x0a,
-    0x00,
+    0x0a, 0x00,
 };
 static const uint8_t aseprite_mini_3b[] = {
-    0x00,
-    0x12,
+    0x00, 0x12,
 };
 static const uint8_t aseprite_mini_3c[] = {
-    0x04,
-    0x0a,
-    0x11,
-    0x00,
+    0x04, 0x0a, 0x11, 0x00,
 };
 static const uint8_t aseprite_mini_3d[] = {
-    0x0a,
-    0x0a,
-    0x00,
+    0x0a, 0x0a, 0x00,
 };
 static const uint8_t aseprite_mini_3e[] = {
-    0x11,
-    0x0a,
-    0x04,
-    0x00,
+    0x11, 0x0a, 0x04, 0x00,
 };
 static const uint8_t aseprite_mini_3f[] = {
-    0x02,
-    0x01,
-    0x15,
-    0x02,
+    0x02, 0x01, 0x15, 0x02,
 };
 static const uint8_t aseprite_mini_40[] = {
     0x00,
 };
 static const uint8_t aseprite_mini_41[] = {
-    0x1f,
-    0x09,
-    0x1f,
-    0x00,
+    0x1f, 0x09, 0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_42[] = {
-    0x1f,
-    0x15,
-    0x1b,
-    0x00,
+    0x1f, 0x15, 0x1b, 0x00,
 };
 static const uint8_t aseprite_mini_43[] = {
-    0x1f,
-    0x11,
-    0x11,
-    0x00,
+    0x1f, 0x11, 0x11, 0x00,
 };
 static const uint8_t aseprite_mini_44[] = {
-    0x1f,
-    0x11,
-    0x0e,
-    0x00,
+    0x1f, 0x11, 0x0e, 0x00,
 };
 static const uint8_t aseprite_mini_45[] = {
-    0x1f,
-    0x15,
-    0x15,
-    0x00,
+    0x1f, 0x15, 0x15, 0x00,
 };
 static const uint8_t aseprite_mini_46[] = {
-    0x1f,
-    0x05,
-    0x05,
-    0x00,
+    0x1f, 0x05, 0x05, 0x00,
 };
 static const uint8_t aseprite_mini_47[] = {
-    0x1f,
-    0x11,
-    0x19,
-    0x00,
+    0x1f, 0x11, 0x19, 0x00,
 };
 static const uint8_t aseprite_mini_48[] = {
-    0x1f,
-    0x04,
-    0x1f,
-    0x00,
+    0x1f, 0x04, 0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_49[] = {
-    0x1f,
-    0x00,
+    0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_4a[] = {
-    0x10,
-    0x1f,
-    0x00,
+    0x10, 0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_4b[] = {
-    0x1f,
-    0x0a,
-    0x11,
-    0x00,
+    0x1f, 0x0a, 0x11, 0x00,
 };
 static const uint8_t aseprite_mini_4c[] = {
-    0x1f,
-    0x10,
-    0x00,
+    0x1f, 0x10, 0x00,
 };
 static const uint8_t aseprite_mini_4d[] = {
     0x1f, 0x02, 0x04, 0x02, 0x1f, 0x00,
@@ -435,210 +1269,118 @@ static const uint8_t aseprite_mini_4f[] = {
     0x1f, 0x11, 0x11, 0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_50[] = {
-    0x1f,
-    0x09,
-    0x0f,
-    0x00,
+    0x1f, 0x09, 0x0f, 0x00,
 };
 static const uint8_t aseprite_mini_51[] = {
-    0x0e,
-    0x11,
-    0x09,
-    0x16,
+    0x0e, 0x11, 0x09, 0x16,
 };
 static const uint8_t aseprite_mini_52[] = {
-    0x1f,
-    0x09,
-    0x17,
-    0x00,
+    0x1f, 0x09, 0x17, 0x00,
 };
 static const uint8_t aseprite_mini_53[] = {
-    0x17,
-    0x15,
-    0x1d,
-    0x00,
+    0x17, 0x15, 0x1d, 0x00,
 };
 static const uint8_t aseprite_mini_54[] = {
-    0x01,
-    0x1f,
-    0x01,
-    0x00,
+    0x01, 0x1f, 0x01, 0x00,
 };
 static const uint8_t aseprite_mini_55[] = {
     0x1f, 0x10, 0x10, 0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_56[] = {
-    0x07,
-    0x08,
-    0x10,
-    0x0f,
+    0x07, 0x08, 0x10, 0x0f,
 };
 static const uint8_t aseprite_mini_57[] = {
     0x1f, 0x10, 0x08, 0x10, 0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_58[] = {
-    0x1b,
-    0x04,
-    0x1b,
-    0x00,
+    0x1b, 0x04, 0x1b, 0x00,
 };
 static const uint8_t aseprite_mini_59[] = {
-    0x03,
-    0x1c,
-    0x03,
-    0x00,
+    0x03, 0x1c, 0x03, 0x00,
 };
 static const uint8_t aseprite_mini_5a[] = {
-    0x19,
-    0x15,
-    0x13,
-    0x00,
+    0x19, 0x15, 0x13, 0x00,
 };
 static const uint8_t aseprite_mini_5b[] = {
-    0x1f,
-    0x11,
-    0x00,
+    0x1f, 0x11, 0x00,
 };
 static const uint8_t aseprite_mini_5c[] = {
-    0x07,
-    0x18,
-    0x00,
+    0x07, 0x18, 0x00,
 };
 static const uint8_t aseprite_mini_5d[] = {
-    0x11,
-    0x1f,
-    0x00,
+    0x11, 0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_5e[] = {
-    0x02,
-    0x01,
-    0x02,
-    0x00,
+    0x02, 0x01, 0x02, 0x00,
 };
 static const uint8_t aseprite_mini_5f[] = {
-    0x10,
-    0x10,
-    0x00,
+    0x10, 0x10, 0x00,
 };
 static const uint8_t aseprite_mini_60[] = {
-    0x03,
-    0x00,
+    0x03, 0x00,
 };
 static const uint8_t aseprite_mini_61[] = {
-    0x1a,
-    0x12,
-    0x1e,
-    0x00,
+    0x1a, 0x12, 0x1e, 0x00,
 };
 static const uint8_t aseprite_mini_62[] = {
-    0x1f,
-    0x12,
-    0x1e,
-    0x00,
+    0x1f, 0x12, 0x1e, 0x00,
 };
 static const uint8_t aseprite_mini_63[] = {
-    0x1e,
-    0x12,
-    0x12,
-    0x00,
+    0x1e, 0x12, 0x12, 0x00,
 };
 static const uint8_t aseprite_mini_64[] = {
-    0x1e,
-    0x12,
-    0x1f,
-    0x00,
+    0x1e, 0x12, 0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_65[] = {
-    0x1e,
-    0x12,
-    0x16,
-    0x00,
+    0x1e, 0x12, 0x16, 0x00,
 };
 static const uint8_t aseprite_mini_66[] = {
-    0x1f,
-    0x05,
-    0x00,
+    0x1f, 0x05, 0x00,
 };
 static const uint8_t aseprite_mini_67[] = {
-    0x16,
-    0x12,
-    0x1e,
-    0x00,
+    0x16, 0x12, 0x1e, 0x00,
 };
 static const uint8_t aseprite_mini_68[] = {
-    0x1f,
-    0x04,
-    0x1c,
-    0x00,
+    0x1f, 0x04, 0x1c, 0x00,
 };
 static const uint8_t aseprite_mini_69[] = {
-    0x1d,
-    0x00,
+    0x1d, 0x00,
 };
 static const uint8_t aseprite_mini_6a[] = {
-    0x10,
-    0x1d,
-    0x00,
+    0x10, 0x1d, 0x00,
 };
 static const uint8_t aseprite_mini_6b[] = {
-    0x1f,
-    0x08,
-    0x14,
-    0x00,
+    0x1f, 0x08, 0x14, 0x00,
 };
 static const uint8_t aseprite_mini_6c[] = {
-    0x1f,
-    0x00,
+    0x1f, 0x00,
 };
 static const uint8_t aseprite_mini_6d[] = {
     0x1e, 0x02, 0x1e, 0x02, 0x1e, 0x00,
 };
 static const uint8_t aseprite_mini_6e[] = {
-    0x1e,
-    0x02,
-    0x1e,
-    0x00,
+    0x1e, 0x02, 0x1e, 0x00,
 };
 static const uint8_t aseprite_mini_6f[] = {
-    0x1e,
-    0x12,
-    0x1e,
-    0x00,
+    0x1e, 0x12, 0x1e, 0x00,
 };
 static const uint8_t aseprite_mini_70[] = {
-    0x1e,
-    0x0a,
-    0x0e,
-    0x00,
+    0x1e, 0x0a, 0x0e, 0x00,
 };
 static const uint8_t aseprite_mini_71[] = {
-    0x0e,
-    0x0a,
-    0x1e,
-    0x00,
+    0x0e, 0x0a, 0x1e, 0x00,
 };
 static const uint8_t aseprite_mini_72[] = {
-    0x1e,
-    0x02,
-    0x06,
-    0x00,
+    0x1e, 0x02, 0x06, 0x00,
 };
 static const uint8_t aseprite_mini_73[] = {
-    0x16,
-    0x12,
-    0x1a,
-    0x00,
+    0x16, 0x12, 0x1a, 0x00,
 };
 static const uint8_t aseprite_mini_74[] = {
-    0x1f,
-    0x12,
-    0x00,
+    0x1f, 0x12, 0x00,
 };
 static const uint8_t aseprite_mini_75[] = {
-    0x1e,
-    0x10,
-    0x1e,
-    0x00,
+    0x1e, 0x10, 0x1e, 0x00,
 };
 static const uint8_t aseprite_mini_76[] = {
     0x06, 0x08, 0x10, 0x08, 0x06,
@@ -647,25 +1389,16 @@ static const uint8_t aseprite_mini_77[] = {
     0x0e, 0x10, 0x08, 0x10, 0x0e, 0x00,
 };
 static const uint8_t aseprite_mini_78[] = {
-    0x16,
-    0x08,
-    0x16,
-    0x00,
+    0x16, 0x08, 0x16, 0x00,
 };
 static const uint8_t aseprite_mini_79[] = {
-    0x16,
-    0x14,
-    0x1e,
-    0x00,
+    0x16, 0x14, 0x1e, 0x00,
 };
 static const uint8_t aseprite_mini_7a[] = {
-    0x1a,
-    0x12,
-    0x16,
-    0x00,
+    0x1a, 0x12, 0x16, 0x00,
 };
 
-const Sprite aseprite_mini[ASEPRITE_MINI_END - ASEPRITE_MINI_START + 1] = {
+static const Sprite aseprite_mini_sprites[] = {
     {.width = 4, .height = 5, .image = aseprite_mini_20},
     {.width = 2, .height = 5, .image = aseprite_mini_21},
     {.width = 4, .height = 5, .image = aseprite_mini_22},
@@ -757,4 +1490,10 @@ const Sprite aseprite_mini[ASEPRITE_MINI_END - ASEPRITE_MINI_START + 1] = {
     {.width = 4, .height = 5, .image = aseprite_mini_78},
     {.width = 4, .height = 5, .image = aseprite_mini_79},
     {.width = 4, .height = 5, .image = aseprite_mini_7a},
+};
+
+const SpriteFont aseprite_mini = {
+    .sprites = aseprite_mini_sprites,
+    .firstChar = 0x20,
+    .lastChar = 0x7a,
 };

@@ -149,6 +149,7 @@ void sh1106_draw(uint8_t x, uint8_t y, SH1106_Color color) {
 /// \param sprite la imagen a colocar
 /// \param x columna de inicio, comenzando desde 0
 /// \param y fila de inicio, comenzando desde 0
+/// \param inverted invierte el color de los píxeles
 /// \note
 /// Digamos que se quiere almacenar un "1" de 5x10. El mismo se verá así en
 /// memoria:
@@ -180,7 +181,8 @@ void sh1106_draw(uint8_t x, uint8_t y, SH1106_Color color) {
 /// Endianness = Little-endian
 /// Data type = uint8_t
 /// ```
-void sh1106_place(const Sprite sprite, uint8_t x, uint8_t y, bool_t inverted) {
+void sh1106_place(const Sprite sprite, uint8_t x, uint8_t y,
+                  SH1106_Color color) {
   uint8_t shift = y & 7;
   uint8_t pages = sprite.height / 8;
   uint8_t page, col;
@@ -189,7 +191,7 @@ void sh1106_place(const Sprite sprite, uint8_t x, uint8_t y, bool_t inverted) {
   for (page = 0; page < pages; page++) {
     for (col = 0; col < sprite.width; col++) {
       uint8_t imageByte = sprite.image[page * sprite.width + col];
-      if (inverted) {
+      if (color != SH1106_WHITE) {
         imageByte = ~imageByte;
       }
       uint8_t screenX = col + x;
@@ -220,7 +222,7 @@ void sh1106_place(const Sprite sprite, uint8_t x, uint8_t y, bool_t inverted) {
   if (lastBits != 0) {
     for (col = 0; col < sprite.width; col++) {
       uint8_t imageByte = sprite.image[page * sprite.width + col];
-      if (inverted) {
+      if (color != SH1106_WHITE) {
         imageByte = ~imageByte;
       }
       uint8_t screenX = col + x;

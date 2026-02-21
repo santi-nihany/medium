@@ -14,6 +14,10 @@
 #define RF_TX_TIMEOUT_MS 2000
 /// Gap que se toma como fin de trama (us).
 #define RF_END_GAP_US 12000
+/// Duración máxima permitida por edge al reproducir desde .sig.
+#define RF_REPLAY_MAX_EDGE_US 500000UL
+/// Duración total máxima permitida al reproducir desde .sig.
+#define RF_REPLAY_MAX_TOTAL_US 15000000UL
 
 static uint16_t rfPulseUs[RF_CAPTURE_PULSES_MAX];
 static uint16_t rfPulseCount = 0;
@@ -29,6 +33,41 @@ static cc1101OokConfig_t rfCapturedConfig;
 static uint32_t rfCyclesToUs(uint32_t cycles) {
   return (uint32_t)(((uint64_t)cycles * 1000000ULL) /
                     (uint64_t)SystemCoreClock);
+}
+
+/// Calcula 10^exp para exp>=0 con saturación.
+static uint32_t rfPow10U32(uint8_t exp) {
+  uint32_t value = 1U;
+  for (uint8_t i = 0; i < exp; i++) {
+    if (value > (0xFFFFFFFFUL / 10UL)) {
+      return 0xFFFFFFFFUL;
+    }
+    value *= 10U;
+  }
+  return value;
+}
+
+/// Convierte ticks de .sig a microsegundos según tickScale.
+static uint32_t rfTicksToUs(uint32_t ticks, int8_t tickScale) {
+  if (tickScale >= -6) {
+    uint8_t exp = (uint8_t)(tickScale + 6);
+    uint32_t mul = rfPow10U32(exp);
+    if (mul == 0xFFFFFFFFUL) {
+      return 0xFFFFFFFFUL;
+    }
+    if (ticks > (0xFFFFFFFFUL / mul)) {
+      return 0xFFFFFFFFUL;
+    }
+    return ticks * mul;
+  } else {
+    uint8_t exp = (uint8_t)(-6 - tickScale);
+    uint32_t div = rfPow10U32(exp);
+    if (div == 0U) {
+      return 1U;
+    }
+    ticks = (ticks + (div / 2U)) / div;
+    return (ticks == 0U) ? 1U : ticks;
+  }
 }
 
 /// Aplica la configuración de captura actual.
@@ -298,6 +337,81 @@ bool_t rfReplayCaptured(void) {
          (rfCapturedBand == CC1101_BAND_315MHZ) ? "315MHz" : "433MHz");
 #endif
 
+  return TRUE;
+}
+
+/// Reproduce una señal RF desde flancos cargados de un .sig.
+bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
+                     uint8_t startLevel, int8_t tickScale) {
+  bool_t level = startLevel ? TRUE : FALSE;
+  uint32_t totalUs = 0U;
+
+  if (edges == NULL || edgeCount == 0U) {
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [rf] ERROR: rfReplayEdges sin datos\r\n");
+#endif
+    return FALSE;
+  }
+
+  if (!rfApplyCurrentProfile()) {
+    return FALSE;
+  }
+
+  cc1101_enterIdle();
+  gpioInit(CC1101_GDO0_PIN, GPIO_OUTPUT);
+  gpioWrite(CC1101_GDO0_PIN, level);
+
+  if (!cc1101_enterTx()) {
+    gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [rf] ERROR: rfReplayEdges no pudo entrar en TX\r\n");
+#endif
+    return FALSE;
+  }
+
+  for (uint32_t i = 0; i < edgeCount; i++) {
+    uint32_t durationUs = rfTicksToUs(edges[i], tickScale);
+    if (durationUs == 0U) {
+      durationUs = 1U;
+    }
+    if (durationUs > RF_REPLAY_MAX_EDGE_US) {
+#ifdef MEDIUM_DEBUG
+      printf("[modules] [rf] ERROR: edge demasiado largo (%luus)\r\n",
+             (unsigned long)durationUs);
+#endif
+      cc1101_enterIdle();
+      gpioWrite(CC1101_GDO0_PIN, FALSE);
+      gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
+      cc1101_enterRx();
+      return FALSE;
+    }
+    if (totalUs > (RF_REPLAY_MAX_TOTAL_US - durationUs)) {
+#ifdef MEDIUM_DEBUG
+      printf("[modules] [rf] ERROR: replay excede %luus\r\n",
+             (unsigned long)RF_REPLAY_MAX_TOTAL_US);
+#endif
+      cc1101_enterIdle();
+      gpioWrite(CC1101_GDO0_PIN, FALSE);
+      gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
+      cc1101_enterRx();
+      return FALSE;
+    }
+    totalUs += durationUs;
+    delayInaccurateUs(durationUs);
+    level = !level;
+    gpioWrite(CC1101_GDO0_PIN, level);
+  }
+  delay(2);
+
+  cc1101_enterIdle();
+  gpioWrite(CC1101_GDO0_PIN, FALSE);
+  gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
+  cc1101_enterRx();
+
+#ifdef MEDIUM_DEBUG
+  printf("[modules] [rf] Replay desde .sig OK (%lu edges, scale=%d)\r\n",
+         (unsigned long)edgeCount, (int)tickScale);
+#endif
   return TRUE;
 }
 
