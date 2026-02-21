@@ -113,10 +113,9 @@ typedef enum {
   CC1101_SNOP = 0x3D,
 } cc1101Strobe_t;
 
-/// Bandas ISM soportadas por el preset OOK.
+/// Banda ISM soportada por el preset OOK.
 typedef enum {
-  CC1101_BAND_315MHZ = 0,
-  CC1101_BAND_433MHZ = 1,
+  CC1101_BAND_433MHZ = 0,
 } cc1101Band_t;
 
 /// Configuración conceptual para OOK. Se traduce internamente a registros.
@@ -153,13 +152,9 @@ typedef struct {
 
 /// PATABLE recomendada para OOK en 433 MHz (0 = off, 1 = nivel alto)
 extern const uint8_t CC1101_OOK_PA_TABLE_433[2];
-/// PATABLE recomendada para OOK en 315 MHz (0 = off, 1 = nivel alto)
-extern const uint8_t CC1101_OOK_PA_TABLE_315[2];
 
 /// Preset OOK de referencia para 433 MHz
 extern const cc1101OokConfig_t CC1101_OOK_CONFIG_433;
-/// Preset OOK de referencia para 315 MHz
-extern const cc1101OokConfig_t CC1101_OOK_CONFIG_315;
 
 bool_t cc1101_init(void);
 bool_t cc1101_reset(void);

@@ -11,7 +11,7 @@
 #include "task.h"
 
 /// Stack de la task de storage (en palabras).
-#define STORAGE_TASK_STACK_WORDS 256
+#define STORAGE_TASK_STACK_WORDS 640
 /// Prioridad de la task de storage.
 #define STORAGE_TASK_PRIORITY (tskIDLE_PRIORITY + 3)
 /// Período de monitoreo de la microSD.

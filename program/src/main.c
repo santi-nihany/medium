@@ -11,6 +11,7 @@
 #include "modules/display.h"
 #include "modules/ir.h"
 #include "modules/rf.h"
+#include "modules/spi_bus.h"
 #include "modules/storage.h"
 #include "task.h"
 #include "tasks/task_storage.h"
@@ -22,6 +23,7 @@ int main(void) {
   adcConfig(ADC_ENABLE);   // Usado por buttons.c
   i2cConfig(I2C0, 100000); // Usado por sh1106.c
   spiConfig(SPI0);         // Usado por cc1101.c y storage.c
+  spiBusInit();            // Mutex para arbitrar SPI entre SD y CC1101
 
 #ifdef MEDIUM_DEBUG
   // Configurar UART para debug
@@ -34,11 +36,7 @@ int main(void) {
   displayInit();
   storageInit();
   irInit();
-  //   if (!rfInit()) {
-  // #ifdef MEDIUM_DEBUG
-  //     printf("[       ] [main] WARN: rfInit fallo\r\n");
-  // #endif
-  //   }
+  rfInit();
 
 #ifdef MEDIUM_DEBUG
   printf("[       ] [main] Componentes inicializados\r\n");

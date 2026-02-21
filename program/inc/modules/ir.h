@@ -11,7 +11,7 @@
 #include "main.h"
 
 /// Máxima cantidad de pulsos almacenados por captura.
-#define IR_MAX_PULSES 200
+#define IR_MAX_PULSES 500
 
 /// Pulso IR (nivel + duración).
 typedef struct {

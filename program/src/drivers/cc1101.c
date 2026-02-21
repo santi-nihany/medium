@@ -6,6 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "drivers/cc1101.h"
+#include "modules/spi_bus.h"
 
 /// Timeout de espera de SO/MISO cuando el chip está listo
 #define CC1101_READY_TIMEOUT 100000U
@@ -22,8 +23,6 @@ typedef struct {
 
 /// PATABLE recomendada para OOK en 433 MHz.
 const uint8_t CC1101_OOK_PA_TABLE_433[2] = {0x00, 0xC0};
-/// PATABLE recomendada para OOK en 315 MHz.
-const uint8_t CC1101_OOK_PA_TABLE_315[2] = {0x00, 0xC2};
 
 /// Preset OOK para 433 MHz.
 const cc1101OokConfig_t CC1101_OOK_CONFIG_433 = {
@@ -39,24 +38,6 @@ const cc1101OokConfig_t CC1101_OOK_CONFIG_433 = {
     .rxBandwidthHz = 60000,
     .asyncSerialMode = FALSE,
     .paTable = CC1101_OOK_PA_TABLE_433,
-    .paTableSize = 2,
-    .paPowerIndex = 1,
-};
-
-/// Preset OOK para 315 MHz.
-const cc1101OokConfig_t CC1101_OOK_CONFIG_315 = {
-    .band = CC1101_BAND_315MHZ,
-    .channel = 0,
-    .deviceAddress = 0,
-    .packetLength = 61,
-    .variableLength = TRUE,
-    .crcEnable = TRUE,
-    .addressCheckEnable = FALSE,
-    .syncWord = 0xD391,
-    .dataRateBps = 38400,
-    .rxBandwidthHz = 812500,
-    .asyncSerialMode = FALSE,
-    .paTable = CC1101_OOK_PA_TABLE_315,
     .paTableSize = 2,
     .paPowerIndex = 1,
 };
@@ -80,16 +61,24 @@ static bool_t cc1101_waitReady(void) {
 
 /// Inicia una transacción SPI y verifica estado listo del CC1101.
 static bool_t cc1101_beginTransaction(void) {
+  if (!spiBusLock(portMAX_DELAY)) {
+    return FALSE;
+  }
+
   cc1101_select();
   if (!cc1101_waitReady()) {
     cc1101_deselect();
+    spiBusUnlock();
     return FALSE;
   }
   return TRUE;
 }
 
 /// Cierra una transacción SPI activa.
-static void cc1101_endTransaction(void) { cc1101_deselect(); }
+static void cc1101_endTransaction(void) {
+  cc1101_deselect();
+  spiBusUnlock();
+}
 
 /// Escribe una lista de registros internos.
 /// \param config arreglo de pares dirección/valor
@@ -169,22 +158,15 @@ static void cc1101_encodeDataRate(uint32_t targetBps, uint8_t *mdmcfg4RateBits,
   *mdmcfg3RateBits = bestM;
 }
 
-/// Obtiene registros de frecuencia para banda 315 o 433 MHz.
-/// \param band banda solicitada
+/// Obtiene registros de frecuencia para 433 MHz.
 /// \param freq2 salida FREQ2
 /// \param freq1 salida FREQ1
 /// \param freq0 salida FREQ0
-static void cc1101_frequencyRegisters(cc1101Band_t band, uint8_t *freq2,
-                                      uint8_t *freq1, uint8_t *freq0) {
-  if (band == CC1101_BAND_315MHZ) {
-    *freq2 = 0x0C;
-    *freq1 = 0x1D;
-    *freq0 = 0x8A;
-  } else {
-    *freq2 = 0x10;
-    *freq1 = 0xB0;
-    *freq0 = 0x71;
-  }
+static void cc1101_frequencyRegisters(uint8_t *freq2, uint8_t *freq1,
+                                      uint8_t *freq0) {
+  *freq2 = 0x10;
+  *freq1 = 0xB0;
+  *freq0 = 0x71;
 }
 
 /// Inicializa pines, resetea el CC1101 y aplica una configuración base.
@@ -193,7 +175,7 @@ bool_t cc1101_init(void) {
   gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
   gpioInit(CC1101_GDO2_PIN, GPIO_INPUT);
   cc1101_deselect();
-  delay(1);
+  delayInaccurateUs(1000);
 
   if (!cc1101_reset()) {
 #ifdef MEDIUM_DEBUG
@@ -231,12 +213,12 @@ bool_t cc1101_reset(void) {
   uint8_t command = CC1101_SRES;
 
   cc1101_deselect();
-  delay(1);
+  delayInaccurateUs(1000);
 
   cc1101_select();
-  delay(1);
+  delayInaccurateUs(1000);
   cc1101_deselect();
-  delay(1);
+  delayInaccurateUs(1000);
 
   if (!cc1101_beginTransaction()) {
 #ifdef MEDIUM_DEBUG
@@ -256,7 +238,7 @@ bool_t cc1101_reset(void) {
   }
 
   cc1101_endTransaction();
-  delay(1);
+  delayInaccurateUs(1000);
   return TRUE;
 }
 
@@ -275,8 +257,8 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
       {CC1101_FIFOTHR, 0x47},  {CC1101_FSCTRL1, 0x06},  {CC1101_FSCTRL0, 0x00},
       {CC1101_MDMCFG1, 0x22},  {CC1101_MDMCFG0, 0xF8},  {CC1101_MCSM2, 0x07},
       {CC1101_MCSM1, 0x30},    {CC1101_MCSM0, 0x18},    {CC1101_FOCCFG, 0x16},
-      {CC1101_BSCFG, 0x6C},    {CC1101_AGCCTRL2, 0x43}, {CC1101_AGCCTRL1, 0x40},
-      {CC1101_AGCCTRL0, 0x91}, {CC1101_FREND1, 0x56},   {CC1101_FSCAL3, 0xE9},
+      {CC1101_BSCFG, 0x6C},    {CC1101_AGCCTRL2, 0x04}, {CC1101_AGCCTRL1, 0x00},
+      {CC1101_AGCCTRL0, 0x92}, {CC1101_FREND1, 0x56},   {CC1101_FSCAL3, 0xE9},
       {CC1101_FSCAL2, 0x2A},   {CC1101_FSCAL1, 0x00},   {CC1101_FSCAL0, 0x1F},
       {CC1101_TEST2, 0x81},    {CC1101_TEST1, 0x35},    {CC1101_TEST0, 0x09},
   };
@@ -293,7 +275,7 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
   cc1101_encodeRxBandwidth(config->rxBandwidthHz, &mdmcfg4BwBits);
   cc1101_encodeDataRate(config->dataRateBps, &mdmcfg4RateBits,
                         &mdmcfg3RateBits);
-  cc1101_frequencyRegisters(config->band, &freq2, &freq1, &freq0);
+  cc1101_frequencyRegisters(&freq2, &freq1, &freq0);
 
   pktctrl1 = config->asyncSerialMode
                  ? 0x00
@@ -353,11 +335,11 @@ bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
 
 #ifdef MEDIUM_DEBUG
   printf(
-      "[drivers] [cc1101] OOK cfg OK band=%s ch=%u rate=%lu bw=%luHz async=%u "
+      "[drivers] [cc1101] OOK cfg OK band=433 ch=%u rate=%lu bw=%luHz async=%u "
       "sync=0x%04X pklen=%u\r\n",
-      (config->band == CC1101_BAND_315MHZ) ? "315" : "433", config->channel,
-      (unsigned long)config->dataRateBps, (unsigned long)config->rxBandwidthHz,
-      config->asyncSerialMode, config->syncWord, config->packetLength);
+      config->channel, (unsigned long)config->dataRateBps,
+      (unsigned long)config->rxBandwidthHz, config->asyncSerialMode,
+      config->syncWord, config->packetLength);
 #endif
 
   return TRUE;

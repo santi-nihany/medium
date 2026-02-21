@@ -17,7 +17,7 @@
 #include "utils/sprites.h"
 
 /// Stack de la task UI (en palabras).
-#define UI_TASK_STACK_WORDS 640
+#define UI_TASK_STACK_WORDS 1024
 /// Prioridad de la task UI.
 #define UI_TASK_PRIORITY (tskIDLE_PRIORITY + 2)
 /// Cantidad de slots por modo.
@@ -408,7 +408,7 @@ static bool_t uiCaptureToSlot(uiMode_t mode, const char *path) {
       saveOk = uiSaveLastIrCaptureToSig(path);
     }
   } else {
-    captureOk = rfCapture433MHzWithCancel(uiCaptureCancelCallback, NULL);
+    captureOk = rfCaptureWithCancel(uiCaptureCancelCallback, NULL);
     if (captureOk && storageIsReady()) {
       saveOk = uiSaveLastRfCaptureToSig(path);
     }
