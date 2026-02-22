@@ -40,6 +40,7 @@ cd scripts/custom
 uv sync                     # para instalar las dependencias
 uv run sprites.py           # genera el archivo sprites.c
 uv run terminal.py --help   # abre una terminal serial con la placa
+uv run signals.py --help    # analiza un archivo .sig
 ```
 
 ### Patches
@@ -56,7 +57,7 @@ Se utilizó la última versión del [firmware_v3](https://github.com/epernia/fir
   ```diff c
   case FSSDC_CardStatus_Ready:
     g_sdcard->status = SDCARD_Status_ReadyUnmounted;
-    // Automount
+  - // Automount
   - if (!sdcardMount( true ))
   - {
   -     Board_UARTPutSTR ("sapi_sdcard: Automount failed!\r\n");

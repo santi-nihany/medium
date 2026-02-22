@@ -25,6 +25,10 @@ SIG_META_NEC_ADDR = 1
 SIG_META_NEC_CMD = 2
 SIG_META_RF_FREQ_HZ = 16
 SIG_META_RF_MODULATION = 17
+SIG_META_RF_PRINCETON_KEY = 18
+SIG_META_RF_PRINCETON_TE_US = 19
+SIG_META_RF_PRINCETON_GUARD = 20
+SIG_META_RF_PRINCETON_BITS = 21
 
 SIG_RF_MOD_AM270 = 1
 SIG_RF_MOD_AM650 = 2
@@ -85,6 +89,10 @@ def parse_tlv_metadata(raw: bytes) -> tuple[list[dict[str, object]], str | None]
             SIG_META_NEC_CMD: "NEC_CMD",
             SIG_META_RF_FREQ_HZ: "RF_FREQ_HZ",
             SIG_META_RF_MODULATION: "RF_MODULATION",
+            SIG_META_RF_PRINCETON_KEY: "RF_PRINCETON_KEY",
+            SIG_META_RF_PRINCETON_TE_US: "RF_PRINCETON_TE_US",
+            SIG_META_RF_PRINCETON_GUARD: "RF_PRINCETON_GUARD",
+            SIG_META_RF_PRINCETON_BITS: "RF_PRINCETON_BITS",
         }.get(tlv_type, f"TYPE_{tlv_type}")
 
         value_le = None
@@ -100,6 +108,16 @@ def parse_tlv_metadata(raw: bytes) -> tuple[list[dict[str, object]], str | None]
         elif tlv_type == SIG_META_RF_FREQ_HZ and tlv_len == 4:
             hz = int.from_bytes(value, "little")
             decoded_value = f"{hz / 1_000_000:.3f} MHz"
+        elif tlv_type == SIG_META_RF_PRINCETON_KEY and tlv_len == 4:
+            key = int.from_bytes(value, "little")
+            decoded_value = f"0x{key:06X}"
+        elif tlv_type == SIG_META_RF_PRINCETON_TE_US and tlv_len == 2:
+            te = int.from_bytes(value, "little")
+            decoded_value = f"{te} us"
+        elif tlv_type == SIG_META_RF_PRINCETON_GUARD and tlv_len == 1:
+            decoded_value = f"Te*{value[0]}"
+        elif tlv_type == SIG_META_RF_PRINCETON_BITS and tlv_len == 1:
+            decoded_value = f"{value[0]} bits"
 
         items.append(
             {

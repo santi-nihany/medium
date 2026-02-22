@@ -27,6 +27,10 @@ typedef enum {
   SIG_META_NEC_CMD = 2,
   SIG_META_RF_FREQ_HZ = 16,
   SIG_META_RF_MODULATION = 17,
+  SIG_META_RF_PRINCETON_KEY = 18,
+  SIG_META_RF_PRINCETON_TE_US = 19,
+  SIG_META_RF_PRINCETON_GUARD = 20,
+  SIG_META_RF_PRINCETON_BITS = 21,
 } sigMetadataType_t;
 
 /// Enum de modulación RF serializable en metadata.

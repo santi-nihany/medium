@@ -62,6 +62,12 @@
 #define RF_REPLAY_MAX_EDGE_US 30000UL
 /// Duración total máxima permitida al reproducir desde .sig.
 #define RF_REPLAY_MAX_TOTAL_US 800000UL
+/// Parámetros de decoder Princeton.
+#define RF_PRINCETON_TE_SHORT_US 390U
+#define RF_PRINCETON_TE_LONG_US 1170U
+#define RF_PRINCETON_TE_DELTA_US 300U
+#define RF_PRINCETON_PREAMBLE_TE 36U
+#define RF_PRINCETON_GUARD_DEFAULT 30U
 
 typedef struct {
   uint32_t frequencyHz;
@@ -89,6 +95,116 @@ static const rfProfile_t rfAllProfiles[] = {
 /// Diferencia absoluta entre dos enteros sin signo.
 static uint32_t rfAbsDiffU32(uint32_t a, uint32_t b) {
   return (a >= b) ? (a - b) : (b - a);
+}
+
+/// Condición |a-b| < delta
+static bool_t rfDurationDiffLess(uint32_t a, uint32_t b, uint32_t delta) {
+  return (rfAbsDiffU32(a, b) < delta) ? TRUE : FALSE;
+}
+
+/// Decoder Princeton state-machine sobre un stream nivel/duración.
+static bool_t rfDecodePrincetonFromLevelStream(const uint16_t *pulsesUs,
+                                               uint16_t count,
+                                               bool_t firstLevel,
+                                               rfPrincetonInfo_t *infoOut) {
+  uint8_t parserStep = 0U; // 0 reset, 1 save, 2 check
+  uint32_t teLast = 0U;
+  uint32_t decodeData = 0U;
+  uint8_t decodeCountBit = 0U;
+  uint32_t lastData = 0U;
+  uint32_t teAcc = 0U;
+  uint32_t guardTime = RF_PRINCETON_GUARD_DEFAULT;
+  bool_t level = firstLevel;
+
+  if (pulsesUs == NULL || infoOut == NULL || count == 0U) {
+    return FALSE;
+  }
+
+  for (uint16_t i = 0U; i < count; i++) {
+    uint32_t duration = pulsesUs[i];
+
+    switch (parserStep) {
+    case 0U: // Reset
+      if ((!level) &&
+          rfDurationDiffLess(
+              duration, RF_PRINCETON_TE_SHORT_US * RF_PRINCETON_PREAMBLE_TE,
+              RF_PRINCETON_TE_DELTA_US * RF_PRINCETON_PREAMBLE_TE)) {
+        parserStep = 1U;
+        decodeData = 0U;
+        decodeCountBit = 0U;
+        teAcc = 0U;
+        guardTime = RF_PRINCETON_GUARD_DEFAULT;
+      }
+      break;
+
+    case 1U: // SaveDuration (espera nivel alto)
+      if (level) {
+        teLast = duration;
+        teAcc += duration;
+        parserStep = 2U;
+      }
+      break;
+
+    default: // CheckDuration (espera nivel bajo)
+      if (!level) {
+        if (duration >= (RF_PRINCETON_TE_LONG_US * 2U)) {
+          parserStep = 1U;
+          if (decodeCountBit == RF_PRINCETON_BITS) {
+            if ((lastData == decodeData) && (lastData != 0U)) {
+              uint32_t teUs = teAcc / (uint32_t)(decodeCountBit * 4U + 1U);
+              guardTime = (teUs > 0U) ? ((duration + (teUs / 2U)) / teUs)
+                                      : RF_PRINCETON_GUARD_DEFAULT;
+              if (guardTime < 15U || guardTime > 72U) {
+                guardTime = RF_PRINCETON_GUARD_DEFAULT;
+              }
+
+              infoOut->key = decodeData & 0x00FFFFFFUL;
+              infoOut->bitCount = decodeCountBit;
+              infoOut->teUs = (teUs > 0xFFFFUL) ? 0xFFFFU : (uint16_t)teUs;
+              infoOut->guardTime = (uint8_t)guardTime;
+              return TRUE;
+            }
+            lastData = decodeData;
+          }
+          decodeData = 0U;
+          decodeCountBit = 0U;
+          teAcc = 0U;
+          break;
+        }
+
+        teAcc += duration;
+
+        if (rfDurationDiffLess(teLast, RF_PRINCETON_TE_SHORT_US,
+                               RF_PRINCETON_TE_DELTA_US) &&
+            rfDurationDiffLess(duration, RF_PRINCETON_TE_LONG_US,
+                               RF_PRINCETON_TE_DELTA_US * 3U)) {
+          decodeData = (decodeData << 1) | 0U;
+          if (decodeCountBit < 32U) {
+            decodeCountBit++;
+          }
+          parserStep = 1U;
+        } else if (rfDurationDiffLess(teLast, RF_PRINCETON_TE_LONG_US,
+                                      RF_PRINCETON_TE_DELTA_US * 3U) &&
+                   rfDurationDiffLess(duration, RF_PRINCETON_TE_SHORT_US,
+                                      RF_PRINCETON_TE_DELTA_US)) {
+          decodeData = (decodeData << 1) | 1U;
+          if (decodeCountBit < 32U) {
+            decodeCountBit++;
+          }
+          parserStep = 1U;
+        } else {
+          parserStep = 0U;
+        }
+      } else {
+        parserStep = 0U;
+      }
+      break;
+    }
+
+    level = !level;
+  }
+
+  return FALSE;
 }
 
 /// Convierte ciclos de clock a microsegundos.
@@ -157,7 +273,9 @@ static cc1101OokConfig_t rfBuildConfig(uint32_t frequencyHz,
                     : CC1101_BAND_433MHZ;
   config.frequencyHz = frequencyHz;
   config.preset = preset;
-  config.paTable = CC1101_OOK_PA_TABLE_433;
+  config.paTable = (config.band == CC1101_BAND_315MHZ)
+                       ? CC1101_OOK_PA_TABLE_315
+                       : CC1101_OOK_PA_TABLE_433;
   config.paTableSize = 8;
   return config;
 }
@@ -476,7 +594,7 @@ bool_t rfCaptureWithCancel(rfCancelCallback_t cancelCallback, void *context) {
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules] [rf] Captura RF fija %lu.%03luMHz %s\r\n",
+  printf("[modules] [rf] Captura RF %lu.%03luMHz %s\r\n",
          (unsigned long)(config.frequencyHz / 1000000UL),
          (unsigned long)((config.frequencyHz % 1000000UL) / 1000UL),
          (config.preset == CC1101_OOK_PRESET_AM270_ASYNC) ? "AM270" : "AM650");
@@ -559,12 +677,14 @@ bool_t rfReplayCaptured(void) {
     return FALSE;
   }
 
+  __disable_irq();
   for (uint16_t i = 0; i < rfPulseCount; i++) {
     delayInaccurateUs(rfPulseUs[i]);
     level = !level;
     gpioWrite(CC1101_GDO0_PIN, level);
   }
   delayInaccurateUs(2000);
+  __enable_irq();
 
   cc1101_enterIdle();
   gpioWrite(CC1101_GDO0_PIN, FALSE);
@@ -581,6 +701,7 @@ bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
                      uint8_t startLevel, int8_t tickScale) {
   bool_t level = startLevel ? TRUE : FALSE;
   uint32_t totalUs = 0U;
+  bool_t ok = TRUE;
 
   if (edges == NULL || edgeCount == 0U || edgeCount > RF_CAPTURE_PULSES_MAX) {
     return FALSE;
@@ -599,24 +720,19 @@ bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
     return FALSE;
   }
 
+  __disable_irq();
   for (uint32_t i = 0; i < edgeCount; i++) {
     uint32_t durationUs = rfTicksToUs(edges[i], tickScale);
     if (durationUs == 0U) {
       durationUs = 1U;
     }
     if (durationUs > RF_REPLAY_MAX_EDGE_US) {
-      cc1101_enterIdle();
-      gpioWrite(CC1101_GDO0_PIN, FALSE);
-      gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
-      cc1101_enterRx();
-      return FALSE;
+      ok = FALSE;
+      break;
     }
     if (totalUs > (RF_REPLAY_MAX_TOTAL_US - durationUs)) {
-      cc1101_enterIdle();
-      gpioWrite(CC1101_GDO0_PIN, FALSE);
-      gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
-      cc1101_enterRx();
-      return FALSE;
+      ok = FALSE;
+      break;
     }
     totalUs += durationUs;
     delayInaccurateUs(durationUs);
@@ -624,17 +740,63 @@ bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
     gpioWrite(CC1101_GDO0_PIN, level);
   }
 
-  delayInaccurateUs(2000);
+  if (ok) {
+    delayInaccurateUs(2000);
+  }
+  __enable_irq();
   cc1101_enterIdle();
   gpioWrite(CC1101_GDO0_PIN, FALSE);
   gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
   cc1101_enterRx();
+
+  if (!ok) {
+    return FALSE;
+  }
 
 #ifdef MEDIUM_DEBUG
   printf("[modules] [rf] Replay desde .sig OK (%lu edges)\r\n",
          (unsigned long)edgeCount);
 #endif
   return TRUE;
+}
+
+bool_t rfDecodePrinceton(const uint16_t *pulsesUs, uint16_t count,
+                         bool_t firstLevel, rfPrincetonInfo_t *infoOut) {
+  if (infoOut == NULL) {
+    return FALSE;
+  }
+  if (rfDecodePrincetonFromLevelStream(pulsesUs, count, firstLevel, infoOut)) {
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [rf] Princeton decode OK key=0x%06lX te=%uus gt=%u "
+           "bits=%u\r\n",
+           (unsigned long)infoOut->key, (unsigned)infoOut->teUs,
+           (unsigned)infoOut->guardTime, (unsigned)infoOut->bitCount);
+#endif
+    return TRUE;
+  }
+  // Si el nivel inicial llegó invertido por captura, probamos invertido.
+  if (rfDecodePrincetonFromLevelStream(pulsesUs, count, !firstLevel, infoOut)) {
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [rf] Princeton decode OK(inv) key=0x%06lX te=%uus gt=%u "
+           "bits=%u\r\n",
+           (unsigned long)infoOut->key, (unsigned)infoOut->teUs,
+           (unsigned)infoOut->guardTime, (unsigned)infoOut->bitCount);
+#endif
+    return TRUE;
+  }
+  return FALSE;
+}
+
+bool_t rfDecodeLastPrinceton(rfPrincetonInfo_t *infoOut) {
+  const uint16_t *pulsesUs = NULL;
+  uint16_t count = 0U;
+  bool_t firstLevel = FALSE;
+
+  if (!rfGetLastCapture(&pulsesUs, &count, &firstLevel)) {
+    return FALSE;
+  }
+
+  return rfDecodePrinceton(pulsesUs, count, firstLevel, infoOut);
 }
 
 bool_t rfHasCapture(void) { return rfCaptureValid; }

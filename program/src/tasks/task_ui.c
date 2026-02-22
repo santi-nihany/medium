@@ -565,10 +565,14 @@ static bool_t uiSaveLastRfCaptureToSig(const char *path) {
   bool_t firstLevel = FALSE;
   sigRecord_t record;
   cc1101OokConfig_t captureConfig;
-  uint8_t metadata[16];
+  uint8_t metadata[64];
   uint8_t freqBytes[4];
+  uint8_t keyBytes[4];
+  uint8_t teBytes[2];
   uint32_t metadataSize = 0U;
   uint8_t modulationByte;
+  rfPrincetonInfo_t princetonInfo;
+  bool_t hasPrinceton = FALSE;
 
   if (!rfGetLastCapture(&pulses, &pulseCount, &firstLevel) || pulses == NULL ||
       pulseCount == 0) {
@@ -596,6 +600,26 @@ static bool_t uiSaveLastRfCaptureToSig(const char *path) {
     return FALSE;
   }
 
+  hasPrinceton = rfDecodeLastPrinceton(&princetonInfo);
+  if (hasPrinceton) {
+    uiWriteLe32(keyBytes, princetonInfo.key);
+    teBytes[0] = (uint8_t)(princetonInfo.teUs & 0xFFU);
+    teBytes[1] = (uint8_t)((princetonInfo.teUs >> 8) & 0xFFU);
+
+    if (!sigMetadataAppendTlv(metadata, sizeof(metadata), &metadataSize,
+                              SIG_META_RF_PRINCETON_KEY, keyBytes, 4U) ||
+        !sigMetadataAppendTlv(metadata, sizeof(metadata), &metadataSize,
+                              SIG_META_RF_PRINCETON_TE_US, teBytes, 2U) ||
+        !sigMetadataAppendTlv(metadata, sizeof(metadata), &metadataSize,
+                              SIG_META_RF_PRINCETON_GUARD,
+                              &princetonInfo.guardTime, 1U) ||
+        !sigMetadataAppendTlv(metadata, sizeof(metadata), &metadataSize,
+                              SIG_META_RF_PRINCETON_BITS,
+                              &princetonInfo.bitCount, 1U)) {
+      hasPrinceton = FALSE;
+    }
+  }
+
   for (uint16_t i = 0; i < pulseCount; i++) {
     uiSigEdges[i] = pulses[i];
   }
@@ -619,6 +643,11 @@ static bool_t uiSaveLastRfCaptureToSig(const char *path) {
       }
       printf("[tasks  ] [ui] RF guardada en %s (%u edges, %luHz, %s)\r\n", path,
              pulseCount, (unsigned long)captureConfig.frequencyHz, modName);
+      if (hasPrinceton) {
+        printf("[tasks  ] [ui] Metadata Princeton key=0x%06lX te=%uus gt=%u bits=%u\r\n",
+               (unsigned long)princetonInfo.key, (unsigned)princetonInfo.teUs,
+               (unsigned)princetonInfo.guardTime, (unsigned)princetonInfo.bitCount);
+      }
     }
 #endif
     return TRUE;

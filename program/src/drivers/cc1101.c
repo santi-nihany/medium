@@ -23,9 +23,13 @@ typedef struct {
   uint8_t value;
 } cc1101RegisterSetting_t;
 
-/// PATABLE recomendada para OOK (equivalente a Flipper async OOK).
+/// PATABLE recomendada para OOK 315MHz.
+const uint8_t CC1101_OOK_PA_TABLE_315[8] = {0x00, 0xC0, 0x00, 0x00,
+                                            0x00, 0x00, 0x00, 0x00};
+
+/// PATABLE recomendada para OOK 433MHz.
 const uint8_t CC1101_OOK_PA_TABLE_433[8] = {0x00, 0xC0, 0x00, 0x00,
-                                             0x00, 0x00, 0x00, 0x00};
+                                            0x00, 0x00, 0x00, 0x00};
 
 const cc1101OokConfig_t CC1101_OOK_CONFIG_433 = {
     .band = CC1101_BAND_433MHZ,
@@ -39,30 +43,28 @@ const cc1101OokConfig_t CC1101_OOK_CONFIG_315 = {
     .band = CC1101_BAND_315MHZ,
     .frequencyHz = 315000000UL,
     .preset = CC1101_OOK_PRESET_AM650_ASYNC,
-    .paTable = CC1101_OOK_PA_TABLE_433,
+    .paTable = CC1101_OOK_PA_TABLE_315,
     .paTableSize = 8,
 };
 
-/// Preset Flipper: OOK async, BW 270kHz.
+/// Preset OOK async, BW 270kHz.
 static const cc1101RegisterSetting_t cc1101PresetOok270[] = {
-    {CC1101_IOCFG0, 0x0D},   {CC1101_FIFOTHR, 0x47}, {CC1101_PKTCTRL0, 0x32},
-    {CC1101_FSCTRL1, 0x06},  {CC1101_MDMCFG0, 0x00}, {CC1101_MDMCFG1, 0x00},
-    {CC1101_MDMCFG2, 0x30},  {CC1101_MDMCFG3, 0x32}, {CC1101_MDMCFG4, 0x67},
-    {CC1101_MCSM0, 0x18},    {CC1101_FOCCFG, 0x18},  {CC1101_AGCCTRL0, 0x40},
-    {CC1101_AGCCTRL1, 0x00}, {CC1101_AGCCTRL2, 0x03},
-    {CC1101_WORCTRL, 0xFB},  {CC1101_FREND0, 0x11},  {CC1101_FREND1, 0xB6},
-    {0x00, 0x00},
+    {CC1101_IOCFG0, 0x0D},   {CC1101_FIFOTHR, 0x47},  {CC1101_PKTCTRL0, 0x32},
+    {CC1101_FSCTRL1, 0x06},  {CC1101_MDMCFG0, 0x00},  {CC1101_MDMCFG1, 0x00},
+    {CC1101_MDMCFG2, 0x30},  {CC1101_MDMCFG3, 0x32},  {CC1101_MDMCFG4, 0x67},
+    {CC1101_MCSM0, 0x18},    {CC1101_FOCCFG, 0x18},   {CC1101_AGCCTRL0, 0x40},
+    {CC1101_AGCCTRL1, 0x00}, {CC1101_AGCCTRL2, 0x03}, {CC1101_WORCTRL, 0xFB},
+    {CC1101_FREND0, 0x11},   {CC1101_FREND1, 0xB6},   {0x00, 0x00},
 };
 
-/// Preset Flipper: OOK async, BW 650kHz.
+/// Preset OOK async, BW 650kHz.
 static const cc1101RegisterSetting_t cc1101PresetOok650[] = {
-    {CC1101_IOCFG0, 0x0D},   {CC1101_FIFOTHR, 0x07}, {CC1101_PKTCTRL0, 0x32},
-    {CC1101_FSCTRL1, 0x06},  {CC1101_MDMCFG0, 0x00}, {CC1101_MDMCFG1, 0x00},
-    {CC1101_MDMCFG2, 0x30},  {CC1101_MDMCFG3, 0x32}, {CC1101_MDMCFG4, 0x17},
-    {CC1101_MCSM0, 0x18},    {CC1101_FOCCFG, 0x18},  {CC1101_AGCCTRL0, 0x91},
-    {CC1101_AGCCTRL1, 0x00}, {CC1101_AGCCTRL2, 0x07},
-    {CC1101_WORCTRL, 0xFB},  {CC1101_FREND0, 0x11},  {CC1101_FREND1, 0xB6},
-    {0x00, 0x00},
+    {CC1101_IOCFG0, 0x0D},   {CC1101_FIFOTHR, 0x07},  {CC1101_PKTCTRL0, 0x32},
+    {CC1101_FSCTRL1, 0x06},  {CC1101_MDMCFG0, 0x00},  {CC1101_MDMCFG1, 0x00},
+    {CC1101_MDMCFG2, 0x30},  {CC1101_MDMCFG3, 0x32},  {CC1101_MDMCFG4, 0x17},
+    {CC1101_MCSM0, 0x18},    {CC1101_FOCCFG, 0x18},   {CC1101_AGCCTRL0, 0x91},
+    {CC1101_AGCCTRL1, 0x00}, {CC1101_AGCCTRL2, 0x07}, {CC1101_WORCTRL, 0xFB},
+    {CC1101_FREND0, 0x11},   {CC1101_FREND1, 0xB6},   {0x00, 0x00},
 };
 
 static uint32_t cc1101CurrentFrequencyHz = 433920000UL;
@@ -106,7 +108,8 @@ static void cc1101_endTransaction(void) {
 }
 
 /// Escribe una lista de registros hasta encontrar el terminador (0x00, 0x00).
-static bool_t cc1101_applyRegisterConfig(const cc1101RegisterSetting_t *config) {
+static bool_t
+cc1101_applyRegisterConfig(const cc1101RegisterSetting_t *config) {
   uint16_t i = 0;
 
   if (config == NULL) {
@@ -125,13 +128,15 @@ static bool_t cc1101_applyRegisterConfig(const cc1101RegisterSetting_t *config) 
 
 /// Convierte frecuencia absoluta a palabra FREQ (24 bits).
 static uint32_t cc1101_frequencyToWord(uint32_t frequencyHz) {
-  uint64_t freqWord = ((uint64_t)frequencyHz * CC1101_FREQ_SCALE) / CC1101_XOSC_HZ;
+  uint64_t freqWord =
+      ((uint64_t)frequencyHz * CC1101_FREQ_SCALE) / CC1101_XOSC_HZ;
   return (uint32_t)(freqWord & 0xFFFFFFUL);
 }
 
 /// Convierte palabra FREQ (24 bits) a frecuencia absoluta.
 static uint32_t cc1101_wordToFrequency(uint32_t freqWord) {
-  uint64_t frequency = ((uint64_t)freqWord * CC1101_XOSC_HZ) / CC1101_FREQ_SCALE;
+  uint64_t frequency =
+      ((uint64_t)freqWord * CC1101_XOSC_HZ) / CC1101_FREQ_SCALE;
   return (uint32_t)frequency;
 }
 
@@ -214,8 +219,9 @@ bool_t cc1101_calibrate(void) {
 
 bool_t cc1101_waitState(cc1101MarcState_t state, uint32_t timeoutUs) {
   uint32_t startCycles = cyclesCounterRead();
-  while (((uint32_t)(((uint64_t)(cyclesCounterRead() - startCycles) * 1000000ULL) /
-                     (uint64_t)SystemCoreClock)) < timeoutUs) {
+  while (
+      ((uint32_t)(((uint64_t)(cyclesCounterRead() - startCycles) * 1000000ULL) /
+                  (uint64_t)SystemCoreClock)) < timeoutUs) {
     uint8_t status = cc1101_readRegister(CC1101_MARCSTATE) & 0x1F;
     if (status == (uint8_t)state) {
       return TRUE;
@@ -415,9 +421,13 @@ bool_t cc1101_readRxFifo(uint8_t *data, uint8_t size) {
   return cc1101_readBurstRegister(CC1101_FIFO, data, size);
 }
 
-uint8_t cc1101_rxBytes(void) { return cc1101_readRegister(CC1101_RXBYTES) & 0x7F; }
+uint8_t cc1101_rxBytes(void) {
+  return cc1101_readRegister(CC1101_RXBYTES) & 0x7F;
+}
 
-uint8_t cc1101_txBytes(void) { return cc1101_readRegister(CC1101_TXBYTES) & 0x7F; }
+uint8_t cc1101_txBytes(void) {
+  return cc1101_readRegister(CC1101_TXBYTES) & 0x7F;
+}
 
 bool_t cc1101_gdo0Read(void) { return gpioRead(CC1101_GDO0_PIN); }
 

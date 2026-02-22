@@ -126,7 +126,7 @@ typedef enum {
   CC1101_BAND_433MHZ = 1,
 } cc1101Band_t;
 
-/// Presets de modulación asíncrona compatibles con Flipper
+/// Presets de modulación asíncrona compatibles
 typedef enum {
   CC1101_OOK_PRESET_AM270_ASYNC = 0,
   CC1101_OOK_PRESET_AM650_ASYNC = 1,
@@ -141,6 +141,8 @@ typedef struct {
   uint8_t paTableSize;
 } cc1101OokConfig_t;
 
+/// PATABLE OOK asíncrona (0: off, 1: potencia de TX)
+extern const uint8_t CC1101_OOK_PA_TABLE_315[8];
 /// PATABLE OOK asíncrona (0: off, 1: potencia de TX)
 extern const uint8_t CC1101_OOK_PA_TABLE_433[8];
 
