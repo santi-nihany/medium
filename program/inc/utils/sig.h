@@ -25,7 +25,15 @@ typedef enum {
 typedef enum {
   SIG_META_NEC_ADDR = 1,
   SIG_META_NEC_CMD = 2,
+  SIG_META_RF_FREQ_HZ = 16,
+  SIG_META_RF_MODULATION = 17,
 } sigMetadataType_t;
+
+/// Enum de modulación RF serializable en metadata.
+typedef enum {
+  SIG_RF_MOD_AM270 = 1,
+  SIG_RF_MOD_AM650 = 2,
+} sigRfModulation_t;
 
 /// Callback de escritura de stream para serializar .sig.
 typedef bool_t (*sigWriteCallback_t)(void *context, const uint8_t *data,

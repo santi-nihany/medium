@@ -25,7 +25,7 @@
 /// Tamaño máximo de path para nombre de slot.
 #define UI_SLOT_PATH_MAX 16U
 /// Capacidad máxima de edges al cargar un .sig para replay.
-#define UI_SIG_EDGE_BUFFER_MAX 1024U
+#define UI_SIG_EDGE_BUFFER_MAX RF_CAPTURE_PULSES_MAX
 /// Capacidad máxima de metadata al cargar un .sig para replay.
 #define UI_SIG_META_BUFFER_MAX 64U
 
@@ -45,9 +45,21 @@ typedef enum {
   UI_SLOT_ACTION_RECORD = 2,
 } uiSlotAction_t;
 
+typedef enum {
+  UI_RF_FREQ_433 = 0,
+  UI_RF_FREQ_315 = 1,
+} uiRfFrequencyOption_t;
+
+typedef enum {
+  UI_RF_MOD_AM650 = 0,
+  UI_RF_MOD_AM270 = 1,
+} uiRfModOption_t;
+
 /// Buffers estáticos para load/replay de .sig.
 static uint32_t uiSigEdges[UI_SIG_EDGE_BUFFER_MAX];
 static uint8_t uiSigMetadata[UI_SIG_META_BUFFER_MAX];
+static uiRfFrequencyOption_t uiRfSelectedFreq = UI_RF_FREQ_433;
+static uiRfModOption_t uiRfSelectedMod = UI_RF_MOD_AM650;
 
 /// Dibuja pantalla principal.
 static void uiDrawMain(uiMode_t mode) {
@@ -172,6 +184,221 @@ static void uiDrawNeedSd(void) {
   displayUpdate();
 }
 
+/// Escribe u32 little-endian.
+static void uiWriteLe32(uint8_t *dst, uint32_t value) {
+  dst[0] = (uint8_t)(value & 0xFFU);
+  dst[1] = (uint8_t)((value >> 8) & 0xFFU);
+  dst[2] = (uint8_t)((value >> 16) & 0xFFU);
+  dst[3] = (uint8_t)((value >> 24) & 0xFFU);
+}
+
+/// Lee u32 little-endian.
+static uint32_t uiReadLe32(const uint8_t *src) {
+  return (uint32_t)src[0] | ((uint32_t)src[1] << 8) | ((uint32_t)src[2] << 16) |
+         ((uint32_t)src[3] << 24);
+}
+
+/// Convierte selección de UI a configuración RF.
+static cc1101OokConfig_t uiRfConfigFromSelection(uiRfFrequencyOption_t freq,
+                                                 uiRfModOption_t mod) {
+  cc1101OokConfig_t config;
+
+  memset(&config, 0, sizeof(config));
+  config.band =
+      (freq == UI_RF_FREQ_315) ? CC1101_BAND_315MHZ : CC1101_BAND_433MHZ;
+  config.frequencyHz = (freq == UI_RF_FREQ_315) ? 315000000UL : 433920000UL;
+  if (mod == UI_RF_MOD_AM270) {
+    config.preset = CC1101_OOK_PRESET_AM270_ASYNC;
+  } else {
+    config.preset = CC1101_OOK_PRESET_AM650_ASYNC;
+  }
+  config.paTable = CC1101_OOK_PA_TABLE_433;
+  config.paTableSize = 8U;
+  return config;
+}
+
+/// Convierte frecuencia a opción de UI.
+static uiRfFrequencyOption_t uiRfFrequencyToOption(uint32_t frequencyHz) {
+  return (frequencyHz >= 360000000UL) ? UI_RF_FREQ_433 : UI_RF_FREQ_315;
+}
+
+/// Convierte preset a opción de UI.
+static uiRfModOption_t uiRfPresetToOption(cc1101ModPreset_t preset) {
+  if (preset == CC1101_OOK_PRESET_AM270_ASYNC) {
+    return UI_RF_MOD_AM270;
+  }
+  return UI_RF_MOD_AM650;
+}
+
+/// Convierte preset de CC1101 a enum de metadata .sig.
+static sigRfModulation_t uiRfPresetToSigModulation(cc1101ModPreset_t preset) {
+  if (preset == CC1101_OOK_PRESET_AM270_ASYNC) {
+    return SIG_RF_MOD_AM270;
+  }
+  return SIG_RF_MOD_AM650;
+}
+
+/// Convierte enum de metadata .sig a preset de CC1101.
+static cc1101ModPreset_t uiSigModulationToRfPreset(sigRfModulation_t modulation) {
+  if (modulation == SIG_RF_MOD_AM270) {
+    return CC1101_OOK_PRESET_AM270_ASYNC;
+  }
+  return CC1101_OOK_PRESET_AM650_ASYNC;
+}
+
+/// Dibuja selector de configuración RF para grabación.
+static void uiDrawRfRecordConfig(uiRfFrequencyOption_t frequency,
+                                 uiRfModOption_t modulation,
+                                 uint8_t selectedRow) {
+  char line1[] = ">Freq: 433.920";
+  char line2[] = " Mod : AM650";
+
+  displayPlace(sprite_background, 0, 0, DISPLAY_WHITE);
+  displayPlace(sprite_rf, 12, 13, DISPLAY_WHITE);
+  displayText(&aseprite_font, "Configuración", 48, 15, DISPLAY_WHITE);
+
+  line1[0] = (selectedRow == 0U) ? '>' : ' ';
+  if (frequency == UI_RF_FREQ_315) {
+    line1[7] = '3';
+    line1[8] = '1';
+    line1[9] = '5';
+    line1[10] = '.';
+    line1[11] = '0';
+    line1[12] = '0';
+    line1[13] = '0';
+  }
+
+  line2[0] = (selectedRow == 1U) ? '>' : ' ';
+  if (modulation == UI_RF_MOD_AM270) {
+    line2[7] = 'A';
+    line2[8] = 'M';
+    line2[9] = '2';
+    line2[10] = '7';
+    line2[11] = '0';
+  } else {
+    line2[7] = 'A';
+    line2[8] = 'M';
+    line2[9] = '6';
+    line2[10] = '5';
+    line2[11] = '0';
+  }
+
+  displayText(&aseprite_font, line1, 48, 34, DISPLAY_WHITE);
+  displayText(&aseprite_font, line2, 48, 44, DISPLAY_WHITE);
+  displayUpdate();
+}
+
+/// Ejecuta selector RF previo a grabación.
+static bool_t uiSelectRfRecordConfig(cc1101OokConfig_t *configOut) {
+  uint8_t selectedRow = 0U;
+  int8_t lastX = joystickRead().x;
+  int8_t lastY = joystickRead().y;
+  bool_t lastEnter = swEnterRead();
+  bool_t lastBack = swBackRead();
+
+  if (configOut == NULL) {
+    return FALSE;
+  }
+
+  uiDrawRfRecordConfig(uiRfSelectedFreq, uiRfSelectedMod, selectedRow);
+
+  while (storageIsReady()) {
+    JoystickState joystick = joystickRead();
+    bool_t enterNow = swEnterRead();
+    bool_t backNow = swBackRead();
+
+    if (joystick.y != 0 && joystick.y != lastY) {
+      if (joystick.y == 1) {
+        selectedRow = 1U;
+        uiDrawRfRecordConfig(uiRfSelectedFreq, uiRfSelectedMod, selectedRow);
+      } else if (joystick.y == -1) {
+        selectedRow = 0U;
+        uiDrawRfRecordConfig(uiRfSelectedFreq, uiRfSelectedMod, selectedRow);
+      }
+    }
+
+    if (joystick.x != 0 && joystick.x != lastX) {
+      if (selectedRow == 0U) {
+        uiRfSelectedFreq = (uiRfSelectedFreq == UI_RF_FREQ_433)
+                               ? UI_RF_FREQ_315
+                               : UI_RF_FREQ_433;
+      } else {
+        if (joystick.x > 0) {
+          uiRfSelectedMod =
+              (uiRfModOption_t)((((uint8_t)uiRfSelectedMod) + 1U) % 2U);
+        } else {
+          uiRfSelectedMod = (uiRfModOption_t)(
+              (((uint8_t)uiRfSelectedMod) + 2U - 1U) % 2U);
+        }
+      }
+      uiDrawRfRecordConfig(uiRfSelectedFreq, uiRfSelectedMod, selectedRow);
+    }
+
+    if (enterNow && !lastEnter) {
+      *configOut = uiRfConfigFromSelection(uiRfSelectedFreq, uiRfSelectedMod);
+      return TRUE;
+    }
+    if (backNow && !lastBack) {
+      return FALSE;
+    }
+
+    lastX = joystick.x;
+    lastY = joystick.y;
+    lastEnter = enterNow;
+    lastBack = backNow;
+    vTaskDelay(pdMS_TO_TICKS(40));
+  }
+
+  return FALSE;
+}
+
+/// Carga config RF desde metadata TLV si existe.
+static bool_t uiRfConfigFromMetadata(const uint8_t *metadata,
+                                     uint32_t metadataSize,
+                                     cc1101OokConfig_t *configOut) {
+  uint32_t pos = 0U;
+  bool_t hasFreq = FALSE;
+  bool_t hasMod = FALSE;
+  uint32_t frequencyHz = 433920000UL;
+  sigRfModulation_t modulation = SIG_RF_MOD_AM650;
+
+  if (metadata == NULL || configOut == NULL || metadataSize == 0U) {
+    return FALSE;
+  }
+
+  while ((pos + 2U) <= metadataSize) {
+    uint8_t type = metadata[pos++];
+    uint8_t len = metadata[pos++];
+    if ((pos + len) > metadataSize) {
+      return FALSE;
+    }
+
+    if (type == SIG_META_RF_FREQ_HZ && len == 4U) {
+      frequencyHz = uiReadLe32(&metadata[pos]);
+      hasFreq = TRUE;
+    } else if (type == SIG_META_RF_MODULATION && len == 1U) {
+      if (metadata[pos] == (uint8_t)SIG_RF_MOD_AM270) {
+        modulation = SIG_RF_MOD_AM270;
+        hasMod = TRUE;
+      } else if (metadata[pos] == (uint8_t)SIG_RF_MOD_AM650) {
+        modulation = SIG_RF_MOD_AM650;
+        hasMod = TRUE;
+      }
+    }
+
+    pos += len;
+  }
+
+  if (!hasFreq && !hasMod) {
+    return FALSE;
+  }
+
+  *configOut = uiRfConfigFromSelection(uiRfFrequencyToOption(frequencyHz),
+                                       uiRfPresetToOption(
+                                           uiSigModulationToRfPreset(modulation)));
+  return TRUE;
+}
+
 /// Callback para cancelar captura desde UI.
 static bool_t uiCaptureCancelCallback(void *context) {
   (void)context;
@@ -257,7 +484,7 @@ static void uiRefreshSlots(uiMode_t mode, bool_t slotHasFile[UI_SLOT_COUNT]) {
 static bool_t uiSaveLastIrCaptureToSig(const char *path) {
   const IRPulse *pulses = NULL;
   uint16_t pulseCount = 0;
-  uint32_t edges[IR_MAX_PULSES];
+  uint16_t startIndex = 0U;
   sigRecord_t record;
   uint8_t metadata[16];
   uint32_t metadataSize = 0;
@@ -273,8 +500,18 @@ static bool_t uiSaveLastIrCaptureToSig(const char *path) {
     return FALSE;
   }
 
-  for (uint16_t i = 0; i < pulseCount; i++) {
-    edges[i] = pulses[i].durationUs;
+  while (startIndex < pulseCount && pulses[startIndex].level != 0U) {
+    startIndex++;
+  }
+  if (startIndex >= pulseCount) {
+#ifdef MEDIUM_DEBUG
+    printf("[tasks  ] [ui] WARN: captura IR sin MARK inicial util\r\n");
+#endif
+    return FALSE;
+  }
+
+  for (uint16_t i = startIndex; i < pulseCount; i++) {
+    uiSigEdges[i - startIndex] = pulses[i].durationUs;
   }
 
   hasNec = irDecodeLastNec(&address, &command);
@@ -293,10 +530,10 @@ static bool_t uiSaveLastIrCaptureToSig(const char *path) {
 
   memset(&record, 0, sizeof(record));
   record.signalType = SIG_SIGNAL_TYPE_IR;
-  record.flags = (pulses[0].level ? SIG_FLAG_START_LEVEL : 0U);
+  record.flags = 0U;     // normalizado a MARK inicial (nivel 0)
   record.tickScale = -6; // 1us por tick
-  record.edgeCount = pulseCount;
-  record.edges = edges;
+  record.edgeCount = (uint32_t)(pulseCount - startIndex);
+  record.edges = uiSigEdges;
   record.metadata = hasNec ? metadata : NULL;
   record.metadataSize = metadataSize;
   if (hasNec) {
@@ -305,7 +542,8 @@ static bool_t uiSaveLastIrCaptureToSig(const char *path) {
 
   if (storageSigSave(path, &record)) {
 #ifdef MEDIUM_DEBUG
-    printf("[tasks  ] [ui] IR guardada en %s (%u edges)\r\n", path, pulseCount);
+    printf("[tasks  ] [ui] IR guardada en %s (%lu edges)\r\n", path,
+           (unsigned long)record.edgeCount);
     if (hasNec) {
       printf("[tasks  ] [ui] Metadata NEC addr=0x%02X cmd=0x%02X\r\n", address,
              command);
@@ -325,8 +563,12 @@ static bool_t uiSaveLastRfCaptureToSig(const char *path) {
   const uint16_t *pulses = NULL;
   uint16_t pulseCount = 0;
   bool_t firstLevel = FALSE;
-  uint32_t edges[RF_CAPTURE_PULSES_MAX];
   sigRecord_t record;
+  cc1101OokConfig_t captureConfig;
+  uint8_t metadata[16];
+  uint8_t freqBytes[4];
+  uint32_t metadataSize = 0U;
+  uint8_t modulationByte;
 
   if (!rfGetLastCapture(&pulses, &pulseCount, &firstLevel) || pulses == NULL ||
       pulseCount == 0) {
@@ -336,20 +578,48 @@ static bool_t uiSaveLastRfCaptureToSig(const char *path) {
     return FALSE;
   }
 
+  if (!rfGetLastCaptureConfig(&captureConfig)) {
+    if (!rfGetActiveConfig(&captureConfig)) {
+      captureConfig =
+          uiRfConfigFromSelection(uiRfSelectedFreq, uiRfSelectedMod);
+    }
+  }
+
+  uiWriteLe32(freqBytes, captureConfig.frequencyHz);
+  if (!sigMetadataAppendTlv(metadata, sizeof(metadata), &metadataSize,
+                            SIG_META_RF_FREQ_HZ, freqBytes, 4U)) {
+    return FALSE;
+  }
+  modulationByte = (uint8_t)uiRfPresetToSigModulation(captureConfig.preset);
+  if (!sigMetadataAppendTlv(metadata, sizeof(metadata), &metadataSize,
+                            SIG_META_RF_MODULATION, &modulationByte, 1U)) {
+    return FALSE;
+  }
+
   for (uint16_t i = 0; i < pulseCount; i++) {
-    edges[i] = pulses[i];
+    uiSigEdges[i] = pulses[i];
   }
 
   memset(&record, 0, sizeof(record));
   record.signalType = SIG_SIGNAL_TYPE_RF;
   record.flags = firstLevel ? SIG_FLAG_START_LEVEL : 0U;
+  record.flags |= SIG_FLAG_HAS_METADATA | SIG_FLAG_HAS_PROFILE;
   record.tickScale = -6; // 1us por tick
   record.edgeCount = pulseCount;
-  record.edges = edges;
+  record.edges = uiSigEdges;
+  record.metadata = metadata;
+  record.metadataSize = metadataSize;
 
   if (storageSigSave(path, &record)) {
 #ifdef MEDIUM_DEBUG
-    printf("[tasks  ] [ui] RF guardada en %s (%u edges)\r\n", path, pulseCount);
+    {
+      const char *modName = "AM650";
+      if (captureConfig.preset == CC1101_OOK_PRESET_AM270_ASYNC) {
+        modName = "AM270";
+      }
+      printf("[tasks  ] [ui] RF guardada en %s (%u edges, %luHz, %s)\r\n", path,
+             pulseCount, (unsigned long)captureConfig.frequencyHz, modName);
+    }
 #endif
     return TRUE;
   }
@@ -363,6 +633,7 @@ static bool_t uiSaveLastRfCaptureToSig(const char *path) {
 /// Reproduce una señal desde archivo .sig.
 static bool_t uiPlaySigFromSlot(uiMode_t mode, const char *path) {
   sigRecordBuffer_t record;
+  cc1101OokConfig_t rfConfig;
 
   memset(&record, 0, sizeof(record));
   record.edges = uiSigEdges;
@@ -384,6 +655,13 @@ static bool_t uiPlaySigFromSlot(uiMode_t mode, const char *path) {
   }
 
   if (mode == UI_MODE_RF && record.signalType == SIG_SIGNAL_TYPE_RF) {
+    if ((record.flags & SIG_FLAG_HAS_METADATA) != 0U &&
+        uiRfConfigFromMetadata(record.metadata, record.metadataSize,
+                               &rfConfig)) {
+      (void)rfSetCaptureConfig(&rfConfig);
+      uiRfSelectedFreq = uiRfFrequencyToOption(rfConfig.frequencyHz);
+      uiRfSelectedMod = uiRfPresetToOption(rfConfig.preset);
+    }
     return rfReplayEdges(record.edges, record.edgeCount,
                          (record.flags & SIG_FLAG_START_LEVEL) ? 1U : 0U,
                          record.tickScale);
@@ -399,15 +677,29 @@ static bool_t uiPlaySigFromSlot(uiMode_t mode, const char *path) {
 static bool_t uiCaptureToSlot(uiMode_t mode, const char *path) {
   bool_t captureOk = FALSE;
   bool_t saveOk = FALSE;
-
-  uiDrawCapturing(mode);
+  cc1101OokConfig_t rfConfig;
 
   if (mode == UI_MODE_IR) {
+    uiDrawCapturing(mode);
     captureOk = irRecordNoStartTimeoutWithCancel(uiCaptureCancelCallback, NULL);
     if (captureOk && storageIsReady()) {
       saveOk = uiSaveLastIrCaptureToSig(path);
     }
   } else {
+    if (!uiSelectRfRecordConfig(&rfConfig)) {
+#ifdef MEDIUM_DEBUG
+      printf("[tasks  ] [ui] Seleccion RF cancelada\r\n");
+#endif
+      return FALSE;
+    }
+    if (!rfSetCaptureConfig(&rfConfig)) {
+#ifdef MEDIUM_DEBUG
+      printf("[tasks  ] [ui] ERROR: no se pudo aplicar config RF\r\n");
+#endif
+      return FALSE;
+    }
+
+    uiDrawCapturing(mode);
     captureOk = rfCaptureWithCancel(uiCaptureCancelCallback, NULL);
     if (captureOk && storageIsReady()) {
       saveOk = uiSaveLastRfCaptureToSig(path);
@@ -502,6 +794,13 @@ static void uiTask(void *taskParam) {
 
   (void)taskParam;
   uiDrawMain(mode);
+  {
+    cc1101OokConfig_t config;
+    if (rfGetActiveConfig(&config)) {
+      uiRfSelectedFreq = uiRfFrequencyToOption(config.frequencyHz);
+      uiRfSelectedMod = uiRfPresetToOption(config.preset);
+    }
+  }
 
   while (1) {
     bool_t enterNow;
@@ -561,6 +860,7 @@ static void uiTask(void *taskParam) {
             uiNormalizeActionForSlot(UI_SLOT_ACTION_RECORD, slotHasFile[0]);
         uiDrawSlotSelect(mode, selectedSlot, selectedAction, slotHasFile);
       }
+
     } else {
       if (joystick.y != lastJoystickY) {
         if (joystick.y == -1 && selectedSlot > 0U) {

@@ -8,42 +8,90 @@
 #include "modules/rf.h"
 #include "drivers/cc1101.h"
 
-/// Timeout máximo para esperar una recepción completa (ms).
-#define RF_CAPTURE_TIMEOUT_MS 5000
+/// Timeout máximo para captura completa (ms).
+#define RF_CAPTURE_TIMEOUT_MS 5000UL
+/// Tiempo de asentamiento de RSSI (us).
+#define RF_RSSI_SETTLE_US 2000UL
+/// Cantidad de muestras RSSI para el analizador.
+#define RF_RSSI_SAMPLES 12U
+/// Muestras para estimar piso de ruido del perfil actual.
+#define RF_NOISE_FLOOR_SAMPLES 10U
+/// Margen sobre piso de ruido para habilitar trigger de captura.
+#define RF_TRIGGER_RSSI_MARGIN_DBM 16
+/// Mínimo de muestras consecutivas "sobre umbral" para iniciar captura.
+#define RF_TRIGGER_CONSECUTIVE_MIN 10U
+/// Período entre muestras de trigger.
+#define RF_TRIGGER_SAMPLE_US 150U
+/// Tiempo de carrier estable requerido antes de abrir captura.
+#define RF_CS_STABLE_US 1500UL
+/// Timeout para observar el primer edge tras trigger.
+#define RF_EDGE_AFTER_TRIGGER_TIMEOUT_US 30000UL
+/// Tiempo máximo sin carrier permitido dentro de una candidata.
+#define RF_MAX_CARRIER_LOSS_US 600UL
+/// Valor mínimo de piso de ruido permitido (dBm).
+#define RF_NOISE_FLOOR_MIN_DBM -110
+/// Valor máximo de piso de ruido permitido (dBm).
+#define RF_NOISE_FLOOR_MAX_DBM -35
+
 /// Gap que se toma como fin de trama (us).
-#define RF_END_GAP_US 12000
+#define RF_END_GAP_US 12000UL
+/// Filtro anti-glitch: pulsos muy cortos se "pegan" al siguiente.
+#define RF_GLITCH_FILTER_US 80UL
 /// Duración mínima de pulso válido para filtrar ruido (us).
-#define RF_MIN_PULSE_US 120
-/// Cantidad mínima de pulsos para considerar una captura válida.
-#define RF_MIN_VALID_PULSES 10
-/// Cantidad máxima de pulsos para aceptar una captura válida.
-#define RF_MAX_VALID_PULSES 320
+#define RF_MIN_PULSE_US 170UL
+/// Duración máxima de pulso aceptado (us).
+#define RF_MAX_PULSE_US 30000UL
+/// Cantidad mínima de pulsos para considerar captura válida.
+#define RF_MIN_VALID_PULSES 40U
 /// Duración mínima total de trama válida (us).
-#define RF_MIN_VALID_TOTAL_US 5000UL
+#define RF_MIN_VALID_TOTAL_US 18000UL
 /// Duración máxima total de trama válida (us).
 #define RF_MAX_VALID_TOTAL_US 2500000UL
-/// Tiempo mínimo de carrier-sense estable antes de capturar (us).
-#define RF_CS_STABLE_US 1500UL
-/// Umbral absoluto de Carrier Sense (AGCCTRL1[5:4]): 0..3.
-/// 1 es el comportamiento "normal" actual.
-#define RF_CS_ABS_THR_BITS 1U
-/// Timeout para ver el primer flanco luego de CS estable (us).
-#define RF_EDGE_AFTER_CS_TIMEOUT_US 60000UL
+/// Pulso mínimo para considerar que hubo variación real en la trama.
+#define RF_MIN_PEAK_PULSE_US 700UL
+/// Cantidad mínima de pulsos largos para validar trama real.
+#define RF_MIN_LONG_PULSES 10U
+/// Umbral de pulso "largo".
+#define RF_LONG_PULSE_US 750UL
+/// Ratio máximo de pulsos cortos permitido.
+#define RF_MAX_SHORT_PULSE_RATIO_PCT 45U
+/// Umbral para considerar pulso "corto" en validación.
+#define RF_SHORT_PULSE_US 260UL
+
 /// Duración máxima permitida por edge al reproducir desde .sig.
 #define RF_REPLAY_MAX_EDGE_US 30000UL
 /// Duración total máxima permitida al reproducir desde .sig.
 #define RF_REPLAY_MAX_TOTAL_US 800000UL
 
+typedef struct {
+  uint32_t frequencyHz;
+  cc1101ModPreset_t preset;
+} rfProfile_t;
+
 static uint16_t rfPulseUs[RF_CAPTURE_PULSES_MAX];
 static uint16_t rfPulseCount = 0;
 static bool_t rfFirstLevel = FALSE;
 static bool_t rfCaptureValid = FALSE;
-static cc1101OokConfig_t rfCaptureConfig;
-static cc1101OokConfig_t rfCapturedConfig;
+static cc1101OokConfig_t rfActiveConfig = {0};
+static cc1101OokConfig_t rfCapturedConfig = {0};
+static uint32_t rfPreferredFrequencyHz = 433920000UL;
+static cc1101ModPreset_t rfPreferredPreset = CC1101_OOK_PRESET_AM650_ASYNC;
+
+static const rfProfile_t rfAllProfiles[] = {
+    {433920000UL, CC1101_OOK_PRESET_AM650_ASYNC},
+    {433920000UL, CC1101_OOK_PRESET_AM270_ASYNC},
+    {315000000UL, CC1101_OOK_PRESET_AM650_ASYNC},
+    {315000000UL, CC1101_OOK_PRESET_AM270_ASYNC},
+};
+
+#define RF_PROFILE_COUNT (sizeof(rfAllProfiles) / sizeof(rfAllProfiles[0]))
+
+/// Diferencia absoluta entre dos enteros sin signo.
+static uint32_t rfAbsDiffU32(uint32_t a, uint32_t b) {
+  return (a >= b) ? (a - b) : (b - a);
+}
 
 /// Convierte ciclos de clock a microsegundos.
-/// \param cycles cantidad de ciclos
-/// \return tiempo en microsegundos
 static uint32_t rfCyclesToUs(uint32_t cycles) {
   return (uint32_t)(((uint64_t)cycles * 1000000ULL) /
                     (uint64_t)SystemCoreClock);
@@ -84,21 +132,13 @@ static uint32_t rfTicksToUs(uint32_t ticks, int8_t tickScale) {
   }
 }
 
-/// Aplica umbral absoluto de carrier sense fijo.
-static bool_t rfApplyCarrierSenseThreshold(void) {
-  uint8_t agc1 = cc1101_readRegister(CC1101_AGCCTRL1);
-  uint8_t csAbsThrBits = (uint8_t)(RF_CS_ABS_THR_BITS & 0x3U);
-  agc1 =
-      (uint8_t)((agc1 & (uint8_t)~(0x3U << 4)) | (uint8_t)(csAbsThrBits << 4));
-  if (!cc1101_writeRegister(CC1101_AGCCTRL1, agc1)) {
-    return FALSE;
+/// Convierte RSSI crudo del CC1101 a dBm aproximados.
+static int16_t rfReadRssiDbm(void) {
+  int16_t raw = (int16_t)cc1101_readRegister(CC1101_RSSI);
+  if (raw >= 128) {
+    raw -= 256;
   }
-
-#ifdef MEDIUM_DEBUG
-  printf("[modules] [rf] CS thr bits=%u (AGCCTRL1=0x%02X)\r\n",
-         (unsigned)csAbsThrBits, agc1);
-#endif
-  return TRUE;
+  return (int16_t)(raw / 2 - 74);
 }
 
 /// Indica si Carrier Sense está activo según PKTSTATUS[6].
@@ -107,37 +147,293 @@ static bool_t rfCarrierSenseActive(void) {
                                                                      : FALSE;
 }
 
-/// Aplica la configuración de captura actual.
-static bool_t rfApplyCurrentProfile(void) {
-  bool_t ok = cc1101_applyOokConfig(&rfCaptureConfig);
-  if (ok) {
-    ok = rfApplyCarrierSenseThreshold();
+/// Crea configuración OOK para una frecuencia/preset.
+static cc1101OokConfig_t rfBuildConfig(uint32_t frequencyHz,
+                                       cc1101ModPreset_t preset) {
+  cc1101OokConfig_t config;
+  config.band = (rfAbsDiffU32(frequencyHz, 315000000UL) <
+                 rfAbsDiffU32(frequencyHz, 433920000UL))
+                    ? CC1101_BAND_315MHZ
+                    : CC1101_BAND_433MHZ;
+  config.frequencyHz = frequencyHz;
+  config.preset = preset;
+  config.paTable = CC1101_OOK_PA_TABLE_433;
+  config.paTableSize = 8;
+  return config;
+}
+
+/// Aplica una configuración y deja el CC1101 en RX.
+static bool_t rfApplyConfig(const cc1101OokConfig_t *config) {
+  if (!cc1101_applyOokConfig(config)) {
+    return FALSE;
   }
+  if (!cc1101_enterRx()) {
+    return FALSE;
+  }
+  rfActiveConfig = *config;
+  return TRUE;
+}
+
+/// Mide score de una configuración para el analizador rápido.
+static bool_t rfMeasureProfile(const cc1101OokConfig_t *config,
+                               int32_t *scoreOut) {
+  int32_t sumDbm = 0;
+  uint8_t csHits = 0;
+
+  if (scoreOut == NULL || !rfApplyConfig(config)) {
+    return FALSE;
+  }
+
+  delayInaccurateUs(RF_RSSI_SETTLE_US);
+
+  for (uint8_t i = 0; i < RF_RSSI_SAMPLES; i++) {
+    int16_t dbm = rfReadRssiDbm();
+    sumDbm += dbm;
+    if (rfCarrierSenseActive()) {
+      csHits++;
+    }
+    delayInaccurateUs(250);
+  }
+
+  *scoreOut = sumDbm + (int32_t)csHits * 12;
+  return TRUE;
+}
+
+/// Estima el piso de ruido RSSI del perfil actual.
+static int16_t rfEstimateNoiseFloorDbm(void) {
+  int32_t sum = 0;
+
+  delayInaccurateUs(RF_RSSI_SETTLE_US);
+  for (uint8_t i = 0; i < RF_NOISE_FLOOR_SAMPLES; i++) {
+    sum += rfReadRssiDbm();
+    delayInaccurateUs(220);
+  }
+
+  {
+    int16_t avg = (int16_t)(sum / (int32_t)RF_NOISE_FLOOR_SAMPLES);
+    if (avg < RF_NOISE_FLOOR_MIN_DBM) {
+      avg = RF_NOISE_FLOOR_MIN_DBM;
+    }
+    if (avg > RF_NOISE_FLOOR_MAX_DBM) {
+      avg = RF_NOISE_FLOOR_MAX_DBM;
+    }
+    return avg;
+  }
+}
+
+/// Captura una candidata dentro de una ventana de tiempo.
+static bool_t rfTryCaptureWindow(uint32_t windowUs,
+                                 rfCancelCallback_t cancelCallback,
+                                 void *context) {
+  uint32_t windowStart = cyclesCounterRead();
+  bool_t baseline = cc1101_gdo0Read();
+  int16_t noiseFloorDbm = rfEstimateNoiseFloorDbm();
+  int16_t triggerDbm = (int16_t)(noiseFloorDbm + RF_TRIGGER_RSSI_MARGIN_DBM);
+  uint8_t triggerConsecutive = 0U;
+
+  while (rfCyclesToUs(cyclesCounterRead() - windowStart) < windowUs) {
+    uint32_t startEdgeCycles;
+    uint32_t lastEdgeCycles;
+    uint32_t lastCarrierCycles;
+    bool_t lastLevel;
+    uint16_t pulseCount = 0U;
+    uint32_t totalUs = 0U;
+    uint16_t maxPulseUs = 0U;
+    uint16_t shortPulseCount = 0U;
+    uint16_t longPulseCount = 0U;
+    uint16_t veryLongPulseCount = 0U;
+    uint32_t pendingGlitchUs = 0U;
+    bool_t sawCarrier = FALSE;
+    uint16_t carrierHitCount = 0U;
+
+    if (cancelCallback != NULL && cancelCallback(context)) {
+      return FALSE;
+    }
+
+    {
+      bool_t level = cc1101_gdo0Read();
+      int16_t rssiDbm = rfReadRssiDbm();
+      bool_t triggerReady = FALSE;
+
+      if (rfCarrierSenseActive() || rssiDbm >= triggerDbm) {
+        if (triggerConsecutive < 255U) {
+          triggerConsecutive++;
+        }
+      } else if (triggerConsecutive > 0U) {
+        triggerConsecutive--;
+      }
+
+      if (triggerConsecutive >= RF_TRIGGER_CONSECUTIVE_MIN &&
+          level != baseline) {
+        triggerReady = TRUE;
+      }
+
+      if (!triggerReady) {
+        delayInaccurateUs(RF_TRIGGER_SAMPLE_US);
+        continue;
+      }
+
+      // Exigir carrier estable antes de abrir candidata.
+      {
+        uint32_t csStart = cyclesCounterRead();
+        while (rfCyclesToUs(cyclesCounterRead() - csStart) < RF_CS_STABLE_US) {
+          if (cancelCallback != NULL && cancelCallback(context)) {
+            return FALSE;
+          }
+          if (!rfCarrierSenseActive()) {
+            triggerConsecutive = 0U;
+            triggerReady = FALSE;
+            break;
+          }
+          delayInaccurateUs(80);
+        }
+      }
+      if (!triggerReady) {
+        continue;
+      }
+
+      rfFirstLevel = level;
+      lastLevel = level;
+      startEdgeCycles = cyclesCounterRead();
+      lastEdgeCycles = startEdgeCycles;
+      lastCarrierCycles = startEdgeCycles;
+      baseline = level;
+
+      // Evitar abrir candidata sin edge inmediato real.
+      {
+        bool_t firstEdgeOk = FALSE;
+        while (rfCyclesToUs(cyclesCounterRead() - startEdgeCycles) <
+               RF_EDGE_AFTER_TRIGGER_TIMEOUT_US) {
+          bool_t nowLevel = cc1101_gdo0Read();
+          if (cancelCallback != NULL && cancelCallback(context)) {
+            return FALSE;
+          }
+          if (rfCarrierSenseActive()) {
+            lastCarrierCycles = cyclesCounterRead();
+            sawCarrier = TRUE;
+            carrierHitCount++;
+          }
+          if (nowLevel != lastLevel) {
+            firstEdgeOk = TRUE;
+            break;
+          }
+          if (rfCyclesToUs(cyclesCounterRead() - lastCarrierCycles) >
+              RF_MAX_CARRIER_LOSS_US) {
+            break;
+          }
+          delayInaccurateUs(60);
+        }
+        if (!firstEdgeOk) {
+          triggerConsecutive = 0U;
+          continue;
+        }
+      }
+    }
+
+    while (rfCyclesToUs(cyclesCounterRead() - windowStart) < windowUs &&
+           pulseCount < RF_CAPTURE_PULSES_MAX) {
+      bool_t level = cc1101_gdo0Read();
+      uint32_t nowCycles = cyclesCounterRead();
+
+      if (cancelCallback != NULL && cancelCallback(context)) {
+        return FALSE;
+      }
+
+      if (level != lastLevel) {
+        uint32_t dtUs = rfCyclesToUs(nowCycles - lastEdgeCycles);
+        lastEdgeCycles = nowCycles;
+        lastLevel = level;
+        if (rfCarrierSenseActive()) {
+          sawCarrier = TRUE;
+          lastCarrierCycles = nowCycles;
+        }
+
+        if (dtUs <= RF_GLITCH_FILTER_US) {
+          if (pendingGlitchUs <= (0xFFFFFFFFUL - dtUs)) {
+            pendingGlitchUs += dtUs;
+          } else {
+            pendingGlitchUs = 0xFFFFFFFFUL;
+          }
+          continue;
+        }
+
+        if (pendingGlitchUs > 0U) {
+          if (dtUs <= (0xFFFFFFFFUL - pendingGlitchUs)) {
+            dtUs += pendingGlitchUs;
+          }
+          pendingGlitchUs = 0U;
+        }
+
+        if (dtUs < RF_MIN_PULSE_US) {
+          continue;
+        }
+        if (dtUs > RF_MAX_PULSE_US) {
+          break;
+        }
+
+        rfPulseUs[pulseCount++] = (uint16_t)dtUs;
+        totalUs += dtUs;
+        if (dtUs > maxPulseUs) {
+          maxPulseUs = (uint16_t)dtUs;
+        }
+        if (dtUs <= RF_SHORT_PULSE_US) {
+          shortPulseCount++;
+        }
+        if (dtUs >= RF_LONG_PULSE_US) {
+          longPulseCount++;
+        }
+        if (dtUs >= (RF_LONG_PULSE_US + 250UL)) {
+          veryLongPulseCount++;
+        }
+
+        if (totalUs > RF_MAX_VALID_TOTAL_US) {
+          break;
+        }
+      } else {
+        uint32_t idleUs = rfCyclesToUs(nowCycles - lastEdgeCycles);
+        if (pulseCount >= 6U && idleUs > RF_END_GAP_US) {
+          break;
+        }
+        if (rfCarrierSenseActive()) {
+          sawCarrier = TRUE;
+          lastCarrierCycles = nowCycles;
+          carrierHitCount++;
+        } else if (rfCyclesToUs(nowCycles - lastCarrierCycles) >
+                   RF_MAX_CARRIER_LOSS_US) {
+          break;
+        }
+        delayInaccurateUs(30);
+      }
+    }
+
+    if (pulseCount >= RF_MIN_VALID_PULSES && totalUs >= RF_MIN_VALID_TOTAL_US &&
+        totalUs <= RF_MAX_VALID_TOTAL_US &&
+        maxPulseUs >= RF_MIN_PEAK_PULSE_US && sawCarrier &&
+        longPulseCount >= RF_MIN_LONG_PULSES && veryLongPulseCount >= 2U &&
+        carrierHitCount >= 8U &&
+        ((uint32_t)shortPulseCount * 100UL) <=
+            ((uint32_t)pulseCount * (uint32_t)RF_MAX_SHORT_PULSE_RATIO_PCT)) {
+      rfPulseCount = pulseCount;
+      rfCaptureValid = TRUE;
 #ifdef MEDIUM_DEBUG
-  if (ok) {
-    printf("[modules] [rf] Perfil 433MHz aplicado (BW=%luHz)\r\n",
-           (unsigned long)rfCaptureConfig.rxBandwidthHz);
-  } else {
-    printf("[modules] [rf] ERROR: no se pudo aplicar perfil 433MHz\r\n");
-  }
+      printf(
+          "[modules] [rf] Captura OK: %u pulsos, nivel inicial=%u, floor=%ddBm "
+          "thr=%ddBm long=%u vlong=%u short=%u cs=%u\r\n",
+          rfPulseCount, rfFirstLevel, (int)noiseFloorDbm, (int)triggerDbm,
+          (unsigned)longPulseCount, (unsigned)veryLongPulseCount,
+          (unsigned)shortPulseCount, (unsigned)carrierHitCount);
 #endif
-  return ok;
+      return TRUE;
+    }
+  }
+
+  return FALSE;
 }
 
-/// Carga parámetros de captura fijos para 433 MHz.
-static void rfLoadDefaultConfig433(void) {
-  rfCaptureConfig = CC1101_OOK_CONFIG_433;
-  rfCaptureConfig.addressCheckEnable = FALSE;
-  rfCaptureConfig.crcEnable = FALSE;
-  rfCaptureConfig.variableLength = FALSE;
-  rfCaptureConfig.packetLength = 0xFF;
-  rfCaptureConfig.rxBandwidthHz = 101000;
-  rfCaptureConfig.asyncSerialMode = TRUE;
-  rfCaptureConfig.dataRateBps = 5000;
-}
-
-/// Inicializa RF para capturar/reproducir a 433 MHz.
 bool_t rfInit(void) {
+  cc1101OokConfig_t config =
+      rfBuildConfig(433920000UL, CC1101_OOK_PRESET_AM650_ASYNC);
+
   if (!cc1101_init()) {
 #ifdef MEDIUM_DEBUG
     printf("[modules] [rf] ERROR: cc1101_init() fallo\r\n");
@@ -145,229 +441,100 @@ bool_t rfInit(void) {
     return FALSE;
   }
 
-  rfLoadDefaultConfig433();
-  if (!rfApplyCurrentProfile()) {
+  rfCaptureValid = FALSE;
+  rfPreferredFrequencyHz = config.frequencyHz;
+  rfPreferredPreset = config.preset;
+
+  if (!rfApplyConfig(&config)) {
     return FALSE;
   }
 
-  cc1101_enterRx();
 #ifdef MEDIUM_DEBUG
-  printf("[modules] [rf] RF listo en RX (433MHz)\r\n");
+  printf("[modules] [rf] RF listo (433.920MHz, AM650)\r\n");
 #endif
   return TRUE;
 }
 
-/// Establece una configuración de captura personalizada.
-/// \param config configuración OOK completa a usar en capture/replay
 bool_t rfSetCaptureConfig(const cc1101OokConfig_t *config) {
   if (config == NULL) {
     return FALSE;
   }
-  rfCaptureConfig = *config;
-  // Forzar operación exclusiva en 433 MHz.
-  rfCaptureConfig.band = CC1101_BAND_433MHZ;
-  rfCaptureConfig.paTable = CC1101_OOK_PA_TABLE_433;
-  rfCaptureConfig.paTableSize = 2;
-  return rfApplyCurrentProfile();
+
+  rfPreferredFrequencyHz = config->frequencyHz;
+  rfPreferredPreset = config->preset;
+  return rfApplyConfig(config);
 }
 
-/// Ajusta sensibilidad de captura RF (carrier sense threshold).
-/// Captura una trama recibida y la guarda como secuencia de pulsos.
 bool_t rfCaptureWithCancel(rfCancelCallback_t cancelCallback, void *context) {
-  uint32_t globalStartCycles;
+  cc1101OokConfig_t config =
+      rfBuildConfig(rfPreferredFrequencyHz, rfPreferredPreset);
 
-  if (!rfApplyCurrentProfile()) {
+  rfCaptureValid = FALSE;
+
+  if (!rfApplyConfig(&config)) {
     return FALSE;
   }
 
-  cc1101_enterRx();
-
 #ifdef MEDIUM_DEBUG
-  printf("[modules] [rf] Capturando señal en 433MHz...\r\n");
+  printf("[modules] [rf] Captura RF fija %lu.%03luMHz %s\r\n",
+         (unsigned long)(config.frequencyHz / 1000000UL),
+         (unsigned long)((config.frequencyHz % 1000000UL) / 1000UL),
+         (config.preset == CC1101_OOK_PRESET_AM270_ASYNC) ? "AM270" : "AM650");
 #endif
 
-  globalStartCycles = cyclesCounterRead();
-
-  while (rfCyclesToUs(cyclesCounterRead() - globalStartCycles) <
-         (RF_CAPTURE_TIMEOUT_MS * 1000UL)) {
-    bool_t baseLevel = cc1101_gdo0Read();
-    uint32_t candidateStartCycles;
-    uint32_t lastEdgeCycles;
-    uint32_t totalUs = 0U;
-    uint16_t pulseCount = 0U;
-    bool_t level;
-    bool_t lastLevel;
-    bool_t overflow = FALSE;
-    bool_t csStable = FALSE;
-    bool_t edgeDetected = FALSE;
-
-    // 1) Esperar CS estable.
-    while (rfCyclesToUs(cyclesCounterRead() - globalStartCycles) <
-           (RF_CAPTURE_TIMEOUT_MS * 1000UL)) {
-      uint32_t csStartCycles;
-      if (cancelCallback != NULL && cancelCallback(context)) {
-#ifdef MEDIUM_DEBUG
-        printf("[modules] [rf] Captura cancelada por callback\r\n");
-#endif
-        return FALSE;
-      }
-      if (!rfCarrierSenseActive()) {
-        delayInaccurateUs(200);
-        continue;
-      }
-
-      csStartCycles = cyclesCounterRead();
-      while (rfCarrierSenseActive()) {
-        if (cancelCallback != NULL && cancelCallback(context)) {
-#ifdef MEDIUM_DEBUG
-          printf("[modules] [rf] Captura cancelada por callback\r\n");
-#endif
-          return FALSE;
-        }
-        if (rfCyclesToUs(cyclesCounterRead() - csStartCycles) >=
-            RF_CS_STABLE_US) {
-          csStable = TRUE;
-          break;
-        }
-        delayInaccurateUs(100);
-      }
-
-      if (csStable) {
-        break;
-      }
-    }
-
-    if (!csStable || rfCyclesToUs(cyclesCounterRead() - globalStartCycles) >=
-                         (RF_CAPTURE_TIMEOUT_MS * 1000UL)) {
-      break;
-    }
-
-    // 2) CS estable: esperar primer flanco en ventana corta.
-    baseLevel = cc1101_gdo0Read();
-    candidateStartCycles = cyclesCounterRead();
-    while (rfCyclesToUs(cyclesCounterRead() - candidateStartCycles) <
-           RF_EDGE_AFTER_CS_TIMEOUT_US) {
-      bool_t cur = cc1101_gdo0Read();
-      if (cancelCallback != NULL && cancelCallback(context)) {
-#ifdef MEDIUM_DEBUG
-        printf("[modules] [rf] Captura cancelada por callback\r\n");
-#endif
-        return FALSE;
-      }
-      if (cur != baseLevel) {
-        edgeDetected = TRUE;
-        break;
-      }
-      if (!rfCarrierSenseActive()) {
-        break;
-      }
-      delayInaccurateUs(120);
-    }
-
-    if (!edgeDetected) {
-      continue;
-    }
-
-    // 3) Capturar candidata.
-    rfCaptureValid = FALSE;
-    rfFirstLevel = !baseLevel;
-    lastLevel = rfFirstLevel;
-    candidateStartCycles = cyclesCounterRead();
-    lastEdgeCycles = candidateStartCycles;
-
-    while (pulseCount < RF_CAPTURE_PULSES_MAX) {
-      uint32_t nowCycles = cyclesCounterRead();
-      level = cc1101_gdo0Read();
-
-      if (cancelCallback != NULL && cancelCallback(context)) {
-#ifdef MEDIUM_DEBUG
-        printf("[modules] [rf] Captura cancelada por callback\r\n");
-#endif
-        return FALSE;
-      }
-
-      if (level != lastLevel) {
-        uint32_t dtUs = rfCyclesToUs(nowCycles - lastEdgeCycles);
-        if (dtUs < RF_MIN_PULSE_US) {
-          lastEdgeCycles = nowCycles;
-          lastLevel = level;
-          continue;
-        }
-        if (dtUs > 0xFFFFUL) {
-          dtUs = 0xFFFFUL;
-        }
-        rfPulseUs[pulseCount++] = (uint16_t)dtUs;
-        if (totalUs > (0xFFFFFFFFUL - dtUs)) {
-          totalUs = 0xFFFFFFFFUL;
-        } else {
-          totalUs += dtUs;
-        }
-        lastEdgeCycles = nowCycles;
-        lastLevel = level;
-      } else {
-        uint32_t idleUs = rfCyclesToUs(nowCycles - lastEdgeCycles);
-        uint32_t frameUs = rfCyclesToUs(nowCycles - candidateStartCycles);
-        if (idleUs > RF_END_GAP_US && pulseCount > 4U) {
-          break;
-        }
-        if (frameUs > RF_MAX_VALID_TOTAL_US) {
-          break;
-        }
-      }
-
-      if (rfCyclesToUs(cyclesCounterRead() - globalStartCycles) >=
-          (RF_CAPTURE_TIMEOUT_MS * 1000UL)) {
-        break;
-      }
-    }
-
-    if (pulseCount >= RF_CAPTURE_PULSES_MAX) {
-      overflow = TRUE;
-    }
-
-    if (overflow || pulseCount < RF_MIN_VALID_PULSES ||
-        pulseCount > RF_MAX_VALID_PULSES || totalUs < RF_MIN_VALID_TOTAL_US ||
-        totalUs > RF_MAX_VALID_TOTAL_US) {
-#ifdef MEDIUM_DEBUG
-      if (overflow) {
-        printf(
-            "[modules] [rf] WARN: candidata descartada por overflow (%u)\r\n",
-            RF_CAPTURE_PULSES_MAX);
-      } else {
-        printf("[modules] [rf] WARN: candidata descartada (pulsos=%u "
-               "total=%luus)\r\n",
-               pulseCount, (unsigned long)totalUs);
-      }
-#endif
-      continue;
-    }
-
-    rfPulseCount = pulseCount;
-    rfCaptureValid = TRUE;
-    rfCapturedConfig = rfCaptureConfig;
-
-#ifdef MEDIUM_DEBUG
-    printf("[modules] [rf] Captura OK: %u pulsos, nivel inicial=%u\r\n",
-           rfPulseCount, rfFirstLevel);
-    printf("[modules] [rf] Primeros pulsos(us): ");
-    for (uint16_t i = 0; i < rfPulseCount && i < 10; i++) {
-      printf("%u ", rfPulseUs[i]);
-    }
-    printf("\r\n");
-#endif
+  if (rfTryCaptureWindow(RF_CAPTURE_TIMEOUT_MS * 1000UL, cancelCallback,
+                         context)) {
+    rfCapturedConfig = config;
+    rfActiveConfig = config;
     return TRUE;
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules] [rf] ERROR: timeout esperando inicio de señal\r\n");
+  printf("[modules] [rf] ERROR: timeout esperando señal RF\r\n");
 #endif
   return FALSE;
 }
 
-/// Captura una trama RF.
 bool_t rfCapture(void) { return rfCaptureWithCancel(NULL, NULL); }
 
-/// Reproduce la última señal capturada como pulsos OOK.
+bool_t rfRunFrequencyAnalyzer(void) {
+  int32_t bestScore = -2147483647;
+  cc1101OokConfig_t bestConfig =
+      rfBuildConfig(433920000UL, CC1101_OOK_PRESET_AM650_ASYNC);
+
+  for (uint8_t i = 0; i < RF_PROFILE_COUNT; i++) {
+    cc1101OokConfig_t config =
+        rfBuildConfig(rfAllProfiles[i].frequencyHz, rfAllProfiles[i].preset);
+    int32_t score = -2147483647;
+
+    if (!rfMeasureProfile(&config, &score)) {
+      continue;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestConfig = config;
+    }
+  }
+
+  rfPreferredFrequencyHz = bestConfig.frequencyHz;
+  rfPreferredPreset = bestConfig.preset;
+
+  if (!rfApplyConfig(&bestConfig)) {
+    return FALSE;
+  }
+
+#ifdef MEDIUM_DEBUG
+  printf("[modules] [rf] Analizador: %lu.%03luMHz %s (score=%ld)\r\n",
+         (unsigned long)(bestConfig.frequencyHz / 1000000UL),
+         (unsigned long)((bestConfig.frequencyHz % 1000000UL) / 1000UL),
+         (bestConfig.preset == CC1101_OOK_PRESET_AM270_ASYNC) ? "AM270"
+                                                              : "AM650",
+         (long)bestScore);
+#endif
+  return TRUE;
+}
+
 bool_t rfReplayCaptured(void) {
   bool_t level;
 
@@ -376,37 +543,18 @@ bool_t rfReplayCaptured(void) {
     printf("[modules] [rf] ERROR: no hay captura valida para reproducir\r\n");
 #endif
     return FALSE;
-  } else {
-#ifdef MEDIUM_DEBUG
-    printf("[modules] [rf] Inciando reproducción...\r\n");
-#endif
   }
 
-  rfCaptureConfig = rfCapturedConfig;
-  if (!rfApplyCurrentProfile()) {
+  if (!rfApplyConfig(&rfCapturedConfig)) {
     return FALSE;
   }
 
-  // Evita contención en GDO0: primero pasar el CC1101 a IDLE, luego manejar la
-  // línea desde MCU para modo async TX.
   cc1101_enterIdle();
   gpioInit(CC1101_GDO0_PIN, GPIO_OUTPUT);
   level = rfFirstLevel;
   gpioWrite(CC1101_GDO0_PIN, level);
 
-#ifdef MEDIUM_DEBUG
-  printf("[modules] [rf] Replay cfg: band=433MHz bw=%lu rate=%lu async=%u "
-         "iocfg0=0x%02X pktctrl0=0x%02X\r\n",
-         (unsigned long)rfCaptureConfig.rxBandwidthHz,
-         (unsigned long)rfCaptureConfig.dataRateBps,
-         rfCaptureConfig.asyncSerialMode, cc1101_readRegister(CC1101_IOCFG0),
-         cc1101_readRegister(CC1101_PKTCTRL0));
-#endif
-
   if (!cc1101_enterTx()) {
-#ifdef MEDIUM_DEBUG
-    printf("[modules] [rf] ERROR: no se pudo entrar en TX\r\n");
-#endif
     gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
     return FALSE;
   }
@@ -424,27 +572,21 @@ bool_t rfReplayCaptured(void) {
   cc1101_enterRx();
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules] [rf] Replay OK: %u pulsos enviados (433MHz)\r\n",
-         rfPulseCount);
+  printf("[modules] [rf] Replay OK: %u pulsos\r\n", rfPulseCount);
 #endif
-
   return TRUE;
 }
 
-/// Reproduce una señal RF desde flancos cargados de un .sig.
 bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
                      uint8_t startLevel, int8_t tickScale) {
   bool_t level = startLevel ? TRUE : FALSE;
   uint32_t totalUs = 0U;
 
   if (edges == NULL || edgeCount == 0U || edgeCount > RF_CAPTURE_PULSES_MAX) {
-#ifdef MEDIUM_DEBUG
-    printf("[modules] [rf] ERROR: rfReplayEdges sin datos validos\r\n");
-#endif
     return FALSE;
   }
 
-  if (!rfApplyCurrentProfile()) {
+  if (!rfApplyConfig(&rfActiveConfig)) {
     return FALSE;
   }
 
@@ -454,9 +596,6 @@ bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
 
   if (!cc1101_enterTx()) {
     gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
-#ifdef MEDIUM_DEBUG
-    printf("[modules] [rf] ERROR: rfReplayEdges no pudo entrar en TX\r\n");
-#endif
     return FALSE;
   }
 
@@ -466,10 +605,6 @@ bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
       durationUs = 1U;
     }
     if (durationUs > RF_REPLAY_MAX_EDGE_US) {
-#ifdef MEDIUM_DEBUG
-      printf("[modules] [rf] ERROR: edge demasiado largo (%luus)\r\n",
-             (unsigned long)durationUs);
-#endif
       cc1101_enterIdle();
       gpioWrite(CC1101_GDO0_PIN, FALSE);
       gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
@@ -477,10 +612,6 @@ bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
       return FALSE;
     }
     if (totalUs > (RF_REPLAY_MAX_TOTAL_US - durationUs)) {
-#ifdef MEDIUM_DEBUG
-      printf("[modules] [rf] ERROR: replay excede %luus\r\n",
-             (unsigned long)RF_REPLAY_MAX_TOTAL_US);
-#endif
       cc1101_enterIdle();
       gpioWrite(CC1101_GDO0_PIN, FALSE);
       gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
@@ -492,24 +623,22 @@ bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
     level = !level;
     gpioWrite(CC1101_GDO0_PIN, level);
   }
-  delayInaccurateUs(2000);
 
+  delayInaccurateUs(2000);
   cc1101_enterIdle();
   gpioWrite(CC1101_GDO0_PIN, FALSE);
   gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
   cc1101_enterRx();
 
 #ifdef MEDIUM_DEBUG
-  printf("[modules] [rf] Replay desde .sig OK (%lu edges, scale=%d)\r\n",
-         (unsigned long)edgeCount, (int)tickScale);
+  printf("[modules] [rf] Replay desde .sig OK (%lu edges)\r\n",
+         (unsigned long)edgeCount);
 #endif
   return TRUE;
 }
 
-/// Informa si hay una captura RF válida en memoria.
 bool_t rfHasCapture(void) { return rfCaptureValid; }
 
-/// Devuelve la última captura RF.
 bool_t rfGetLastCapture(const uint16_t **pulsesUs, uint16_t *count,
                         bool_t *firstLevel) {
   if (!rfCaptureValid || pulsesUs == NULL || count == NULL ||
@@ -520,5 +649,21 @@ bool_t rfGetLastCapture(const uint16_t **pulsesUs, uint16_t *count,
   *pulsesUs = rfPulseUs;
   *count = rfPulseCount;
   *firstLevel = rfFirstLevel;
+  return TRUE;
+}
+
+bool_t rfGetActiveConfig(cc1101OokConfig_t *config) {
+  if (config == NULL) {
+    return FALSE;
+  }
+  *config = rfActiveConfig;
+  return TRUE;
+}
+
+bool_t rfGetLastCaptureConfig(cc1101OokConfig_t *config) {
+  if (config == NULL || !rfCaptureValid) {
+    return FALSE;
+  }
+  *config = rfCapturedConfig;
   return TRUE;
 }

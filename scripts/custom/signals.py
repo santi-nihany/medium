@@ -23,6 +23,11 @@ SIG_SIGNAL_TYPE_RF = 2
 
 SIG_META_NEC_ADDR = 1
 SIG_META_NEC_CMD = 2
+SIG_META_RF_FREQ_HZ = 16
+SIG_META_RF_MODULATION = 17
+
+SIG_RF_MOD_AM270 = 1
+SIG_RF_MOD_AM650 = 2
 
 
 @dataclass
@@ -78,11 +83,23 @@ def parse_tlv_metadata(raw: bytes) -> tuple[list[dict[str, object]], str | None]
         decoded_name = {
             SIG_META_NEC_ADDR: "NEC_ADDR",
             SIG_META_NEC_CMD: "NEC_CMD",
+            SIG_META_RF_FREQ_HZ: "RF_FREQ_HZ",
+            SIG_META_RF_MODULATION: "RF_MODULATION",
         }.get(tlv_type, f"TYPE_{tlv_type}")
 
         value_le = None
         if tlv_len in (1, 2, 4):
             value_le = int.from_bytes(value, "little")
+
+        decoded_value = None
+        if tlv_type == SIG_META_RF_MODULATION and tlv_len == 1:
+            decoded_value = {
+                SIG_RF_MOD_AM270: "AM270",
+                SIG_RF_MOD_AM650: "AM650",
+            }.get(value[0], f"UNKNOWN_MOD({value[0]})")
+        elif tlv_type == SIG_META_RF_FREQ_HZ and tlv_len == 4:
+            hz = int.from_bytes(value, "little")
+            decoded_value = f"{hz / 1_000_000:.3f} MHz"
 
         items.append(
             {
@@ -91,6 +108,7 @@ def parse_tlv_metadata(raw: bytes) -> tuple[list[dict[str, object]], str | None]
                 "len": tlv_len,
                 "value_hex": value.hex(" "),
                 "value_le": value_le,
+                "decoded_value": decoded_value,
             }
         )
         i = end
@@ -239,7 +257,12 @@ def metadata_lines(record: SigRecord) -> list[str]:
         lines.append("Metadata TLV:")
         if items:
             for item in items:
-                if item["value_le"] is None:
+                if item["decoded_value"] is not None:
+                    lines.append(
+                        f"  {item['name']} (t={item['type']}, len={item['len']}): "
+                        f"{item['decoded_value']} hex={item['value_hex']}"
+                    )
+                elif item["value_le"] is None:
                     lines.append(
                         f"  {item['name']} (t={item['type']}, len={item['len']}): "
                         f"hex={item['value_hex']}"

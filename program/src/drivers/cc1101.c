@@ -1,7 +1,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// Librería para utilizar un módulo de radiofrecuencia CC1101 por SPI.
+/// Driver SPI para el transceptor CC1101.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -12,8 +12,10 @@
 #define CC1101_READY_TIMEOUT 100000U
 /// Frecuencia del cristal del CC1101 en Hz
 #define CC1101_XOSC_HZ 26000000UL
-/// Sync mode por defecto: 30/32 bits
-#define CC1101_SYNC_MODE_30_32 0x03
+/// Escala de frecuencia para registros FREQx
+#define CC1101_FREQ_SCALE (1UL << 16)
+/// Timeout para esperar estado MARCSTATE estable
+#define CC1101_STATE_TIMEOUT_US 10000UL
 
 /// Par interno dirección/valor para configurar registros.
 typedef struct {
@@ -21,26 +23,49 @@ typedef struct {
   uint8_t value;
 } cc1101RegisterSetting_t;
 
-/// PATABLE recomendada para OOK en 433 MHz.
-const uint8_t CC1101_OOK_PA_TABLE_433[2] = {0x00, 0xC0};
+/// PATABLE recomendada para OOK (equivalente a Flipper async OOK).
+const uint8_t CC1101_OOK_PA_TABLE_433[8] = {0x00, 0xC0, 0x00, 0x00,
+                                             0x00, 0x00, 0x00, 0x00};
 
-/// Preset OOK para 433 MHz.
 const cc1101OokConfig_t CC1101_OOK_CONFIG_433 = {
     .band = CC1101_BAND_433MHZ,
-    .channel = 0,
-    .deviceAddress = 0,
-    .packetLength = 61,
-    .variableLength = TRUE,
-    .crcEnable = TRUE,
-    .addressCheckEnable = FALSE,
-    .syncWord = 0xD391,
-    .dataRateBps = 38400,
-    .rxBandwidthHz = 60000,
-    .asyncSerialMode = FALSE,
+    .frequencyHz = 433920000UL,
+    .preset = CC1101_OOK_PRESET_AM650_ASYNC,
     .paTable = CC1101_OOK_PA_TABLE_433,
-    .paTableSize = 2,
-    .paPowerIndex = 1,
+    .paTableSize = 8,
 };
+
+const cc1101OokConfig_t CC1101_OOK_CONFIG_315 = {
+    .band = CC1101_BAND_315MHZ,
+    .frequencyHz = 315000000UL,
+    .preset = CC1101_OOK_PRESET_AM650_ASYNC,
+    .paTable = CC1101_OOK_PA_TABLE_433,
+    .paTableSize = 8,
+};
+
+/// Preset Flipper: OOK async, BW 270kHz.
+static const cc1101RegisterSetting_t cc1101PresetOok270[] = {
+    {CC1101_IOCFG0, 0x0D},   {CC1101_FIFOTHR, 0x47}, {CC1101_PKTCTRL0, 0x32},
+    {CC1101_FSCTRL1, 0x06},  {CC1101_MDMCFG0, 0x00}, {CC1101_MDMCFG1, 0x00},
+    {CC1101_MDMCFG2, 0x30},  {CC1101_MDMCFG3, 0x32}, {CC1101_MDMCFG4, 0x67},
+    {CC1101_MCSM0, 0x18},    {CC1101_FOCCFG, 0x18},  {CC1101_AGCCTRL0, 0x40},
+    {CC1101_AGCCTRL1, 0x00}, {CC1101_AGCCTRL2, 0x03},
+    {CC1101_WORCTRL, 0xFB},  {CC1101_FREND0, 0x11},  {CC1101_FREND1, 0xB6},
+    {0x00, 0x00},
+};
+
+/// Preset Flipper: OOK async, BW 650kHz.
+static const cc1101RegisterSetting_t cc1101PresetOok650[] = {
+    {CC1101_IOCFG0, 0x0D},   {CC1101_FIFOTHR, 0x07}, {CC1101_PKTCTRL0, 0x32},
+    {CC1101_FSCTRL1, 0x06},  {CC1101_MDMCFG0, 0x00}, {CC1101_MDMCFG1, 0x00},
+    {CC1101_MDMCFG2, 0x30},  {CC1101_MDMCFG3, 0x32}, {CC1101_MDMCFG4, 0x17},
+    {CC1101_MCSM0, 0x18},    {CC1101_FOCCFG, 0x18},  {CC1101_AGCCTRL0, 0x91},
+    {CC1101_AGCCTRL1, 0x00}, {CC1101_AGCCTRL2, 0x07},
+    {CC1101_WORCTRL, 0xFB},  {CC1101_FREND0, 0x11},  {CC1101_FREND1, 0xB6},
+    {0x00, 0x00},
+};
+
+static uint32_t cc1101CurrentFrequencyHz = 433920000UL;
 
 /// Baja CS para iniciar una transacción SPI con el CC1101.
 static void cc1101_select(void) { gpioWrite(CC1101_CS_PIN, FALSE); }
@@ -80,96 +105,36 @@ static void cc1101_endTransaction(void) {
   spiBusUnlock();
 }
 
-/// Escribe una lista de registros internos.
-/// \param config arreglo de pares dirección/valor
-/// \param size cantidad de entradas
-static bool_t cc1101_applyRegisterConfig(const cc1101RegisterSetting_t *config,
-                                         uint8_t size) {
-  uint8_t i;
+/// Escribe una lista de registros hasta encontrar el terminador (0x00, 0x00).
+static bool_t cc1101_applyRegisterConfig(const cc1101RegisterSetting_t *config) {
+  uint16_t i = 0;
 
-  if (config == NULL || size == 0) {
+  if (config == NULL) {
     return FALSE;
   }
 
-  for (i = 0; i < size; i++) {
+  while (!(config[i].address == 0x00 && config[i].value == 0x00)) {
     if (!cc1101_writeRegister(config[i].address, config[i].value)) {
       return FALSE;
     }
+    i++;
   }
 
   return TRUE;
 }
 
-/// Busca los bits CHANBW_E/M más cercanos para el ancho de banda deseado.
-/// \param targetBwHz ancho de banda objetivo en Hz
-/// \param mdmcfg4BwBits salida con bits [7:4] de MDMCFG4
-static void cc1101_encodeRxBandwidth(uint32_t targetBwHz,
-                                     uint8_t *mdmcfg4BwBits) {
-  uint8_t e, m;
-  uint32_t bestBw = 0;
-  uint32_t bestError = 0xFFFFFFFFUL;
-  uint8_t bestBits = 0;
-
-  for (e = 0; e < 4; e++) {
-    for (m = 0; m < 4; m++) {
-      uint32_t bw = CC1101_XOSC_HZ / (8UL * (4UL + m) * (1UL << e));
-      uint32_t error =
-          (bw > targetBwHz) ? (bw - targetBwHz) : (targetBwHz - bw);
-      if (error < bestError) {
-        bestError = error;
-        bestBw = bw;
-        bestBits = (uint8_t)((e << 6) | (m << 4));
-      }
-    }
-  }
-
-  (void)bestBw;
-  *mdmcfg4BwBits = bestBits;
+/// Convierte frecuencia absoluta a palabra FREQ (24 bits).
+static uint32_t cc1101_frequencyToWord(uint32_t frequencyHz) {
+  uint64_t freqWord = ((uint64_t)frequencyHz * CC1101_FREQ_SCALE) / CC1101_XOSC_HZ;
+  return (uint32_t)(freqWord & 0xFFFFFFUL);
 }
 
-/// Busca DRATE_E/M para aproximar el data rate solicitado.
-/// \param targetBps data rate objetivo en bps
-/// \param mdmcfg4RateBits salida con bits [3:0] de MDMCFG4
-/// \param mdmcfg3RateBits salida con bits [7:0] de MDMCFG3
-static void cc1101_encodeDataRate(uint32_t targetBps, uint8_t *mdmcfg4RateBits,
-                                  uint8_t *mdmcfg3RateBits) {
-  uint8_t e;
-  uint16_t m;
-  uint32_t bestError = 0xFFFFFFFFUL;
-  uint8_t bestE = 0;
-  uint8_t bestM = 0;
-
-  for (e = 0; e < 16; e++) {
-    for (m = 0; m < 256; m++) {
-      uint64_t numerator = (uint64_t)(256UL + m) * (1UL << e) * CC1101_XOSC_HZ;
-      uint32_t rate = (uint32_t)(numerator >> 28);
-      uint32_t error =
-          (rate > targetBps) ? (rate - targetBps) : (targetBps - rate);
-
-      if (error < bestError) {
-        bestError = error;
-        bestE = e;
-        bestM = (uint8_t)m;
-      }
-    }
-  }
-
-  *mdmcfg4RateBits = bestE & 0x0F;
-  *mdmcfg3RateBits = bestM;
+/// Convierte palabra FREQ (24 bits) a frecuencia absoluta.
+static uint32_t cc1101_wordToFrequency(uint32_t freqWord) {
+  uint64_t frequency = ((uint64_t)freqWord * CC1101_XOSC_HZ) / CC1101_FREQ_SCALE;
+  return (uint32_t)frequency;
 }
 
-/// Obtiene registros de frecuencia para 433 MHz.
-/// \param freq2 salida FREQ2
-/// \param freq1 salida FREQ1
-/// \param freq0 salida FREQ0
-static void cc1101_frequencyRegisters(uint8_t *freq2, uint8_t *freq1,
-                                      uint8_t *freq0) {
-  *freq2 = 0x10;
-  *freq1 = 0xB0;
-  *freq0 = 0x71;
-}
-
-/// Inicializa pines, resetea el CC1101 y aplica una configuración base.
 bool_t cc1101_init(void) {
   gpioInit(CC1101_CS_PIN, GPIO_OUTPUT);
   gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
@@ -184,10 +149,9 @@ bool_t cc1101_init(void) {
     return FALSE;
   }
 
-  // Aplicar configuración base OOK para la banda de 433 MHz
   if (!cc1101_applyOokConfig(&CC1101_OOK_CONFIG_433)) {
 #ifdef MEDIUM_DEBUG
-    printf("[drivers] [cc1101] ERROR: config base 433 fallo\r\n");
+    printf("[drivers] [cc1101] ERROR: config base OOK 433 fallo\r\n");
 #endif
     return FALSE;
   }
@@ -200,7 +164,7 @@ bool_t cc1101_init(void) {
   }
 
 #ifdef MEDIUM_DEBUG
-  printf("[drivers] [cc1101] CC1101 inicializado (PART=0x%02X VER=0x%02X)\r\n",
+  printf("[drivers] [cc1101] Init OK PART=0x%02X VER=0x%02X\r\n",
          cc1101_readRegister(CC1101_PARTNUM),
          cc1101_readRegister(CC1101_VERSION));
 #endif
@@ -208,7 +172,6 @@ bool_t cc1101_init(void) {
   return TRUE;
 }
 
-/// Ejecuta la secuencia de reset por SPI recomendada para el CC1101.
 bool_t cc1101_reset(void) {
   uint8_t command = CC1101_SRES;
 
@@ -242,112 +205,101 @@ bool_t cc1101_reset(void) {
   return TRUE;
 }
 
-/// Traduce una configuración OOK conceptual y la aplica a registros CC1101.
-/// \param config configuración OOK de alto nivel
-bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
-  uint8_t mdmcfg4BwBits;
-  uint8_t mdmcfg4RateBits;
-  uint8_t mdmcfg3RateBits;
-  uint8_t freq2, freq1, freq0;
-  uint8_t pktctrl1, pktctrl0;
-  uint8_t frend0;
-
-  static const cc1101RegisterSetting_t commonRegisters[] = {
-      {CC1101_IOCFG2, 0x29},   {CC1101_IOCFG1, 0x2E},   {CC1101_IOCFG0, 0x06},
-      {CC1101_FIFOTHR, 0x47},  {CC1101_FSCTRL1, 0x06},  {CC1101_FSCTRL0, 0x00},
-      {CC1101_MDMCFG1, 0x22},  {CC1101_MDMCFG0, 0xF8},  {CC1101_MCSM2, 0x07},
-      {CC1101_MCSM1, 0x30},    {CC1101_MCSM0, 0x18},    {CC1101_FOCCFG, 0x16},
-      {CC1101_BSCFG, 0x6C},    {CC1101_AGCCTRL2, 0x04}, {CC1101_AGCCTRL1, 0x00},
-      {CC1101_AGCCTRL0, 0x92}, {CC1101_FREND1, 0x56},   {CC1101_FSCAL3, 0xE9},
-      {CC1101_FSCAL2, 0x2A},   {CC1101_FSCAL1, 0x00},   {CC1101_FSCAL0, 0x1F},
-      {CC1101_TEST2, 0x81},    {CC1101_TEST1, 0x35},    {CC1101_TEST0, 0x09},
-  };
-
-  if (config == NULL || config->paTable == NULL || config->paTableSize == 0 ||
-      config->paPowerIndex >= config->paTableSize || config->dataRateBps == 0 ||
-      config->rxBandwidthHz == 0) {
-#ifdef MEDIUM_DEBUG
-    printf("[drivers] [cc1101] ERROR: config OOK invalida\r\n");
-#endif
+bool_t cc1101_calibrate(void) {
+  if (!cc1101_commandStrobe(CC1101_SCAL)) {
     return FALSE;
   }
+  return cc1101_waitState(CC1101_STATE_IDLE, CC1101_STATE_TIMEOUT_US);
+}
 
-  cc1101_encodeRxBandwidth(config->rxBandwidthHz, &mdmcfg4BwBits);
-  cc1101_encodeDataRate(config->dataRateBps, &mdmcfg4RateBits,
-                        &mdmcfg3RateBits);
-  cc1101_frequencyRegisters(&freq2, &freq1, &freq0);
+bool_t cc1101_waitState(cc1101MarcState_t state, uint32_t timeoutUs) {
+  uint32_t startCycles = cyclesCounterRead();
+  while (((uint32_t)(((uint64_t)(cyclesCounterRead() - startCycles) * 1000000ULL) /
+                     (uint64_t)SystemCoreClock)) < timeoutUs) {
+    uint8_t status = cc1101_readRegister(CC1101_MARCSTATE) & 0x1F;
+    if (status == (uint8_t)state) {
+      return TRUE;
+    }
+    delayInaccurateUs(30);
+  }
+  return FALSE;
+}
 
-  pktctrl1 = config->asyncSerialMode
-                 ? 0x00
-                 : (config->addressCheckEnable ? 0x05 : 0x04);
-  pktctrl0 = config->asyncSerialMode ? 0x30
-                                     : ((config->variableLength ? 0x01 : 0x00) |
-                                        (config->crcEnable ? 0x04 : 0x00));
-  frend0 = 0x10 | (config->paPowerIndex & 0x07);
-
+bool_t cc1101_applyModPreset(cc1101ModPreset_t preset) {
   if (!cc1101_enterIdle()) {
-#ifdef MEDIUM_DEBUG
-    printf("[drivers] [cc1101] ERROR: no se pudo entrar en IDLE\r\n");
-#endif
     return FALSE;
   }
 
-  if (!cc1101_applyRegisterConfig(commonRegisters,
-                                  sizeof(commonRegisters) /
-                                      sizeof(commonRegisters[0]))) {
-#ifdef MEDIUM_DEBUG
-    printf("[drivers] [cc1101] ERROR: applyRegisterConfig fallo\r\n");
-#endif
+  switch (preset) {
+  case CC1101_OOK_PRESET_AM270_ASYNC:
+    return cc1101_applyRegisterConfig(cc1101PresetOok270);
+  case CC1101_OOK_PRESET_AM650_ASYNC:
+    return cc1101_applyRegisterConfig(cc1101PresetOok650);
+  default:
+    return FALSE;
+  }
+}
+
+bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config) {
+  if (config == NULL || config->frequencyHz == 0U || config->paTable == NULL ||
+      config->paTableSize == 0U) {
     return FALSE;
   }
 
-  if (!cc1101_writeRegister(CC1101_IOCFG0,
-                            config->asyncSerialMode ? 0x0D : 0x06) ||
-      !cc1101_writeRegister(CC1101_SYNC1, (uint8_t)(config->syncWord >> 8)) ||
-      !cc1101_writeRegister(CC1101_SYNC0, (uint8_t)(config->syncWord & 0xFF)) ||
-      !cc1101_writeRegister(CC1101_PKTLEN, config->packetLength) ||
-      !cc1101_writeRegister(CC1101_PKTCTRL1, pktctrl1) ||
-      !cc1101_writeRegister(CC1101_PKTCTRL0, pktctrl0) ||
-      !cc1101_writeRegister(CC1101_ADDR, config->deviceAddress) ||
-      !cc1101_writeRegister(CC1101_CHANNR, config->channel) ||
-      !cc1101_writeRegister(CC1101_FREQ2, freq2) ||
-      !cc1101_writeRegister(CC1101_FREQ1, freq1) ||
-      !cc1101_writeRegister(CC1101_FREQ0, freq0) ||
-      !cc1101_writeRegister(CC1101_MDMCFG4, mdmcfg4BwBits | mdmcfg4RateBits) ||
-      !cc1101_writeRegister(CC1101_MDMCFG3, mdmcfg3RateBits) ||
-      !cc1101_writeRegister(
-          CC1101_MDMCFG2,
-          0x30 | (config->asyncSerialMode ? 0x00 : CC1101_SYNC_MODE_30_32)) ||
-      !cc1101_writeRegister(CC1101_DEVIATN, 0x00) ||
-      !cc1101_writeRegister(CC1101_FREND0, frend0)) {
-#ifdef MEDIUM_DEBUG
-    printf("[drivers] [cc1101] ERROR: escritura de registros OOK fallo\r\n");
-#endif
+  if (!cc1101_applyModPreset(config->preset)) {
     return FALSE;
   }
 
   if (!cc1101_writePaTable(config->paTable, config->paTableSize)) {
-#ifdef MEDIUM_DEBUG
-    printf("[drivers] [cc1101] ERROR: escritura PATABLE fallo\r\n");
-#endif
+    return FALSE;
+  }
+
+  if (!cc1101_setFrequency(config->frequencyHz)) {
+    return FALSE;
+  }
+
+  if (!cc1101_calibrate()) {
+    return FALSE;
+  }
+
+  if (!cc1101_flushRxFifo() || !cc1101_flushTxFifo()) {
     return FALSE;
   }
 
 #ifdef MEDIUM_DEBUG
-  printf(
-      "[drivers] [cc1101] OOK cfg OK band=433 ch=%u rate=%lu bw=%luHz async=%u "
-      "sync=0x%04X pklen=%u\r\n",
-      config->channel, (unsigned long)config->dataRateBps,
-      (unsigned long)config->rxBandwidthHz, config->asyncSerialMode,
-      config->syncWord, config->packetLength);
+  {
+    const char *presetName = "AM650";
+    if (config->preset == CC1101_OOK_PRESET_AM270_ASYNC) {
+      presetName = "AM270";
+    }
+    printf("[drivers] [cc1101] RF cfg OK f=%luHz preset=%s band=%s\r\n",
+           (unsigned long)config->frequencyHz, presetName,
+           (config->band == CC1101_BAND_315MHZ) ? "315" : "433");
+  }
 #endif
 
   return TRUE;
 }
 
-/// Escribe un registro simple del CC1101.
-/// \param address dirección del registro
-/// \param value valor a escribir
+bool_t cc1101_setFrequency(uint32_t frequencyHz) {
+  uint32_t freqWord = cc1101_frequencyToWord(frequencyHz);
+
+  if (freqWord > 0xFFFFFFUL) {
+    return FALSE;
+  }
+
+  if (!cc1101_writeRegister(CC1101_FREQ2, (uint8_t)(freqWord >> 16)) ||
+      !cc1101_writeRegister(CC1101_FREQ1, (uint8_t)(freqWord >> 8)) ||
+      !cc1101_writeRegister(CC1101_FREQ0, (uint8_t)(freqWord))) {
+    return FALSE;
+  }
+
+  cc1101CurrentFrequencyHz = cc1101_wordToFrequency(freqWord);
+  return TRUE;
+}
+
+uint32_t cc1101_getFrequency(void) { return cc1101CurrentFrequencyHz; }
+
 bool_t cc1101_writeRegister(uint8_t address, uint8_t value) {
   uint8_t buffer[2] = {address, value};
 
@@ -360,9 +312,6 @@ bool_t cc1101_writeRegister(uint8_t address, uint8_t value) {
   return TRUE;
 }
 
-/// Lee un registro de configuración o estado del CC1101.
-/// \param address dirección del registro
-/// \return valor leído
 uint8_t cc1101_readRegister(uint8_t address) {
   uint8_t command = address | CC1101_READ_SINGLE;
   uint8_t data = 0;
@@ -381,10 +330,6 @@ uint8_t cc1101_readRegister(uint8_t address) {
   return data;
 }
 
-/// Escribe múltiples bytes consecutivos (modo burst).
-/// \param address dirección base
-/// \param data datos a escribir
-/// \param size cantidad de bytes
 bool_t cc1101_writeBurstRegister(uint8_t address, const uint8_t *data,
                                  uint8_t size) {
   uint8_t command = address | CC1101_BURST;
@@ -403,10 +348,6 @@ bool_t cc1101_writeBurstRegister(uint8_t address, const uint8_t *data,
   return TRUE;
 }
 
-/// Lee múltiples bytes consecutivos (modo burst).
-/// \param address dirección base
-/// \param data buffer de salida
-/// \param size cantidad de bytes
 bool_t cc1101_readBurstRegister(uint8_t address, uint8_t *data, uint8_t size) {
   uint8_t command = address | CC1101_READ_SINGLE | CC1101_BURST;
 
@@ -424,30 +365,22 @@ bool_t cc1101_readBurstRegister(uint8_t address, uint8_t *data, uint8_t size) {
   return TRUE;
 }
 
-/// Envía un comando strobe al CC1101.
-/// \param strobe comando a ejecutar
 bool_t cc1101_commandStrobe(uint8_t strobe) {
-  uint8_t command = strobe;
-
   if (!cc1101_beginTransaction()) {
     return FALSE;
   }
 
-  spiWrite(SPI0, &command, 1);
+  spiWrite(SPI0, &strobe, 1);
   cc1101_endTransaction();
   return TRUE;
 }
 
-/// Cambia el estado del CC1101 a RX.
 bool_t cc1101_enterRx(void) { return cc1101_commandStrobe(CC1101_SRX); }
 
-/// Cambia el estado del CC1101 a TX.
 bool_t cc1101_enterTx(void) { return cc1101_commandStrobe(CC1101_STX); }
 
-/// Cambia el estado del CC1101 a IDLE.
 bool_t cc1101_enterIdle(void) { return cc1101_commandStrobe(CC1101_SIDLE); }
 
-/// Vacía el FIFO de recepción.
 bool_t cc1101_flushRxFifo(void) {
   if (!cc1101_enterIdle()) {
     return FALSE;
@@ -455,7 +388,6 @@ bool_t cc1101_flushRxFifo(void) {
   return cc1101_commandStrobe(CC1101_SFRX);
 }
 
-/// Vacía el FIFO de transmisión.
 bool_t cc1101_flushTxFifo(void) {
   if (!cc1101_enterIdle()) {
     return FALSE;
@@ -463,51 +395,30 @@ bool_t cc1101_flushTxFifo(void) {
   return cc1101_commandStrobe(CC1101_SFTX);
 }
 
-/// Configura el canal de RF.
-/// \param channel número de canal
 bool_t cc1101_setChannel(uint8_t channel) {
   return cc1101_writeRegister(CC1101_CHANNR, channel);
 }
 
-/// Configura la dirección de nodo para filtrado en modo paquete.
-/// \param address dirección de dispositivo
 bool_t cc1101_setDeviceAddress(uint8_t address) {
   return cc1101_writeRegister(CC1101_ADDR, address);
 }
 
-/// Escribe la tabla de potencia (PATABLE).
-/// \param paTable tabla de niveles de potencia
-/// \param size cantidad de niveles
 bool_t cc1101_writePaTable(const uint8_t *paTable, uint8_t size) {
   return cc1101_writeBurstRegister(CC1101_PATABLE, paTable, size);
 }
 
-/// Copia un payload al FIFO de transmisión.
-/// \param data buffer con el payload
-/// \param size cantidad de bytes
 bool_t cc1101_writeTxFifo(const uint8_t *data, uint8_t size) {
   return cc1101_writeBurstRegister(CC1101_FIFO, data, size);
 }
 
-/// Extrae datos del FIFO de recepción.
-/// \param data buffer de salida
-/// \param size cantidad de bytes a leer
 bool_t cc1101_readRxFifo(uint8_t *data, uint8_t size) {
   return cc1101_readBurstRegister(CC1101_FIFO, data, size);
 }
 
-/// Lee cantidad de bytes disponibles en RX FIFO.
-uint8_t cc1101_rxBytes(void) {
-  return cc1101_readRegister(CC1101_RXBYTES) & 0x7F;
-}
+uint8_t cc1101_rxBytes(void) { return cc1101_readRegister(CC1101_RXBYTES) & 0x7F; }
 
-/// Lee cantidad de bytes cargados en TX FIFO.
-uint8_t cc1101_txBytes(void) {
-  return cc1101_readRegister(CC1101_TXBYTES) & 0x7F;
-}
+uint8_t cc1101_txBytes(void) { return cc1101_readRegister(CC1101_TXBYTES) & 0x7F; }
 
-/// Lee el estado lógico del pin GDO0.
 bool_t cc1101_gdo0Read(void) { return gpioRead(CC1101_GDO0_PIN); }
 
-/// Lee el estado lógico del pin GDO2.
 bool_t cc1101_gdo2Read(void) { return gpioRead(CC1101_GDO2_PIN); }

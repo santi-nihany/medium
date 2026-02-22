@@ -307,6 +307,7 @@ bool_t irReplay(void) {
 bool_t irReplayEdges(const uint32_t *edges, uint32_t edgeCount,
                      uint8_t startLevel, int8_t tickScale) {
   uint8_t level = startLevel;
+  uint32_t firstMarkIndex = 0U;
   uint32_t totalUs = 0U;
 
   if (edges == NULL || edgeCount == 0U) {
@@ -321,8 +322,27 @@ bool_t irReplayEdges(const uint32_t *edges, uint32_t edgeCount,
          (unsigned long)edgeCount, (unsigned)startLevel, (int)tickScale);
 #endif
 
+  // Normaliza para arrancar en MARK (nivel 0) y evitar desfase por espacios
+  // iniciales capturados antes del frame.
+  while (firstMarkIndex < edgeCount && level != 0U) {
+    firstMarkIndex++;
+    level = (uint8_t)!level;
+  }
+  if (firstMarkIndex >= edgeCount) {
+#ifdef MEDIUM_DEBUG
+    printf("[modules] [ir] ERROR: replay sin MARK inicial util\r\n");
+#endif
+    return FALSE;
+  }
+#ifdef MEDIUM_DEBUG
+  if (firstMarkIndex > 0U) {
+    printf("[modules] [ir] WARN: replay IR omitio %lu edges iniciales (space)\r\n",
+           (unsigned long)firstMarkIndex);
+  }
+#endif
+
   __disable_irq();
-  for (uint32_t i = 0; i < edgeCount; i++) {
+  for (uint32_t i = firstMarkIndex; i < edgeCount; i++) {
     uint32_t durationUs = irTicksToUs(edges[i], tickScale);
     if (durationUs == 0U) {
       durationUs = 1U;

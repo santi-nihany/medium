@@ -1,7 +1,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// Definiciones para utilzar un módulo de radiofrecuencia CC1101 por SPI.
+/// Driver SPI para el transceptor CC1101.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -113,52 +113,51 @@ typedef enum {
   CC1101_SNOP = 0x3D,
 } cc1101Strobe_t;
 
-/// Banda ISM soportada por el preset OOK.
+/// Estados MARCSTATE (nibble bajo)
 typedef enum {
-  CC1101_BAND_433MHZ = 0,
+  CC1101_STATE_IDLE = 0x01,
+  CC1101_STATE_RX = 0x0D,
+  CC1101_STATE_TX = 0x13,
+} cc1101MarcState_t;
+
+/// Banda objetivo de operación
+typedef enum {
+  CC1101_BAND_315MHZ = 0,
+  CC1101_BAND_433MHZ = 1,
 } cc1101Band_t;
 
-/// Configuración conceptual para OOK. Se traduce internamente a registros.
+/// Presets de modulación asíncrona compatibles con Flipper
+typedef enum {
+  CC1101_OOK_PRESET_AM270_ASYNC = 0,
+  CC1101_OOK_PRESET_AM650_ASYNC = 1,
+} cc1101ModPreset_t;
+
+/// Configuración conceptual de captura/replay OOK asíncrono
 typedef struct {
-  /// Banda de operación
   cc1101Band_t band;
-  /// Canal de RF
-  uint8_t channel;
-  /// Dirección de nodo
-  uint8_t deviceAddress;
-  /// Largo de paquete máximo/fijo (según variableLength)
-  uint8_t packetLength;
-  /// Usa longitud variable de paquete
-  bool_t variableLength;
-  /// Habilita CRC en hardware
-  bool_t crcEnable;
-  /// Habilita filtro por dirección
-  bool_t addressCheckEnable;
-  /// Sync word de 16 bits
-  uint16_t syncWord;
-  /// Data rate objetivo en bits por segundo
-  uint32_t dataRateBps;
-  /// Ancho de banda RX objetivo en Hz
-  uint32_t rxBandwidthHz;
-  /// Habilita modo async serial (sin FIFO de paquetes)
-  bool_t asyncSerialMode;
-  /// Tabla de potencia para OOK (PATABLE)
+  uint32_t frequencyHz;
+  cc1101ModPreset_t preset;
   const uint8_t *paTable;
-  /// Cantidad de entradas en PATABLE
   uint8_t paTableSize;
-  /// Índice de PATABLE para transmitir el bit '1' en OOK
-  uint8_t paPowerIndex;
 } cc1101OokConfig_t;
 
-/// PATABLE recomendada para OOK en 433 MHz (0 = off, 1 = nivel alto)
-extern const uint8_t CC1101_OOK_PA_TABLE_433[2];
+/// PATABLE OOK asíncrona (0: off, 1: potencia de TX)
+extern const uint8_t CC1101_OOK_PA_TABLE_433[8];
 
-/// Preset OOK de referencia para 433 MHz
+/// Configuración por defecto (433.92MHz, AM650)
 extern const cc1101OokConfig_t CC1101_OOK_CONFIG_433;
+/// Configuración 315MHz AM650
+extern const cc1101OokConfig_t CC1101_OOK_CONFIG_315;
 
 bool_t cc1101_init(void);
 bool_t cc1101_reset(void);
+bool_t cc1101_calibrate(void);
+bool_t cc1101_waitState(cc1101MarcState_t state, uint32_t timeoutUs);
+
+bool_t cc1101_applyModPreset(cc1101ModPreset_t preset);
 bool_t cc1101_applyOokConfig(const cc1101OokConfig_t *config);
+bool_t cc1101_setFrequency(uint32_t frequencyHz);
+uint32_t cc1101_getFrequency(void);
 
 bool_t cc1101_writeRegister(uint8_t address, uint8_t value);
 uint8_t cc1101_readRegister(uint8_t address);
