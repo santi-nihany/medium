@@ -62,6 +62,10 @@
 #define RF_REPLAY_MAX_EDGE_US 30000UL
 /// Duración total máxima permitida al reproducir desde .sig.
 #define RF_REPLAY_MAX_TOTAL_US 800000UL
+/// Cantidad de repeticiones por replay (estilo mandos RF).
+#define RF_REPLAY_REPEAT_COUNT 8U
+/// Guard time entre repeticiones.
+#define RF_REPLAY_GUARD_US 10000UL
 /// Parámetros de decoder Princeton.
 #define RF_PRINCETON_TE_SHORT_US 390U
 #define RF_PRINCETON_TE_LONG_US 1170U
@@ -75,6 +79,7 @@ typedef struct {
 } rfProfile_t;
 
 static uint16_t rfPulseUs[RF_CAPTURE_PULSES_MAX];
+static uint32_t rfReplayDurUs[RF_CAPTURE_PULSES_MAX];
 static uint16_t rfPulseCount = 0;
 static bool_t rfFirstLevel = FALSE;
 static bool_t rfCaptureValid = FALSE;
@@ -82,6 +87,13 @@ static cc1101OokConfig_t rfActiveConfig = {0};
 static cc1101OokConfig_t rfCapturedConfig = {0};
 static uint32_t rfPreferredFrequencyHz = 433920000UL;
 static cc1101ModPreset_t rfPreferredPreset = CC1101_OOK_PRESET_AM650_ASYNC;
+static volatile const uint32_t *rfReplayIsrEdgesUs = NULL;
+static volatile uint32_t rfReplayIsrEdgeCount = 0U;
+static volatile uint32_t rfReplayIsrIndex = 0U;
+static volatile bool_t rfReplayIsrRunning = FALSE;
+static volatile bool_t rfReplayIsrDone = FALSE;
+static volatile bool_t rfReplayIsrLevel = FALSE;
+static bool_t rfRitInitialized = FALSE;
 
 static const rfProfile_t rfAllProfiles[] = {
     {433920000UL, CC1101_OOK_PRESET_AM650_ASYNC},
@@ -211,6 +223,116 @@ static bool_t rfDecodePrincetonFromLevelStream(const uint16_t *pulsesUs,
 static uint32_t rfCyclesToUs(uint32_t cycles) {
   return (uint32_t)(((uint64_t)cycles * 1000000ULL) /
                     (uint64_t)SystemCoreClock);
+}
+
+/// Convierte microsegundos a ticks del reloj del core.
+static uint32_t rfUsToTicks(uint32_t us) {
+  uint64_t ticks = ((uint64_t)SystemCoreClock * (uint64_t)us) / 1000000ULL;
+  if (ticks == 0ULL) {
+    ticks = 1ULL;
+  }
+  if (ticks > 0xFFFFFFFFULL) {
+    ticks = 0xFFFFFFFFULL;
+  }
+  return (uint32_t)ticks;
+}
+
+/// Inicializa RIT para agendar flancos de replay.
+static void rfRitInit(void) {
+  if (rfRitInitialized) {
+    return;
+  }
+  Chip_RIT_Init(LPC_RITIMER);
+  LPC_RITIMER->MASK = 0U;
+  Chip_RIT_Disable(LPC_RITIMER);
+  Chip_RIT_ClearInt(LPC_RITIMER);
+  NVIC_ClearPendingIRQ(RITIMER_IRQn);
+  NVIC_EnableIRQ(RITIMER_IRQn);
+  rfRitInitialized = TRUE;
+}
+
+/// Agenda siguiente flanco de replay en RIT.
+static void rfRitScheduleNext(uint32_t delayUs) {
+  uint32_t now = Chip_RIT_GetCounter(LPC_RITIMER);
+  Chip_RIT_SetCOMPVAL(LPC_RITIMER, now + rfUsToTicks(delayUs));
+}
+
+/// ISR común RIT: ejecuta scheduler de edges para replay RF.
+static void rfRitIrqHandler(void) {
+  if (!rfReplayIsrRunning) {
+    Chip_RIT_ClearInt(LPC_RITIMER);
+    return;
+  }
+
+  Chip_RIT_ClearInt(LPC_RITIMER);
+
+  rfReplayIsrLevel = (bool_t)!rfReplayIsrLevel;
+  gpioWrite(CC1101_GDO0_PIN, rfReplayIsrLevel);
+  rfReplayIsrIndex++;
+
+  if (rfReplayIsrIndex >= rfReplayIsrEdgeCount) {
+    rfReplayIsrRunning = FALSE;
+    rfReplayIsrDone = TRUE;
+    Chip_RIT_Disable(LPC_RITIMER);
+    return;
+  }
+
+  rfRitScheduleNext(rfReplayIsrEdgesUs[rfReplayIsrIndex]);
+}
+
+/// Nombre de ISR para algunos vectores (M0).
+void RIT_WDT_IRQHandler(void) { rfRitIrqHandler(); }
+
+/// Nombre de ISR para algunos vectores (M4).
+void RIT_IRQHandler(void) { rfRitIrqHandler(); }
+
+/// Reproduce una secuencia de edges (us) con temporización por RIT ISR.
+static bool_t rfReplayTimedUs(const uint32_t *edgesUs, uint32_t edgeCount,
+                              bool_t startLevel) {
+  uint32_t totalUs = 0U;
+  uint32_t timeoutStart;
+  uint32_t timeoutUs;
+
+  if (edgesUs == NULL || edgeCount == 0U || edgeCount > RF_CAPTURE_PULSES_MAX) {
+    return FALSE;
+  }
+
+  for (uint32_t i = 0; i < edgeCount; i++) {
+    if (edgesUs[i] == 0U || edgesUs[i] > RF_REPLAY_MAX_EDGE_US) {
+      return FALSE;
+    }
+    if (totalUs > (RF_REPLAY_MAX_TOTAL_US - edgesUs[i])) {
+      return FALSE;
+    }
+    totalUs += edgesUs[i];
+  }
+
+  rfRitInit();
+  rfReplayIsrEdgesUs = edgesUs;
+  rfReplayIsrEdgeCount = edgeCount;
+  rfReplayIsrIndex = 0U;
+  rfReplayIsrLevel = startLevel;
+  rfReplayIsrDone = FALSE;
+  rfReplayIsrRunning = TRUE;
+
+  gpioWrite(CC1101_GDO0_PIN, rfReplayIsrLevel);
+  Chip_RIT_Disable(LPC_RITIMER);
+  Chip_RIT_ClearInt(LPC_RITIMER);
+  rfRitScheduleNext(rfReplayIsrEdgesUs[0]);
+  Chip_RIT_Enable(LPC_RITIMER);
+
+  timeoutUs = totalUs + 50000UL;
+  timeoutStart = cyclesCounterRead();
+  while (rfReplayIsrRunning) {
+    if (rfCyclesToUs(cyclesCounterRead() - timeoutStart) > timeoutUs) {
+      rfReplayIsrRunning = FALSE;
+      Chip_RIT_Disable(LPC_RITIMER);
+      Chip_RIT_ClearInt(LPC_RITIMER);
+      return FALSE;
+    }
+  }
+
+  return rfReplayIsrDone;
 }
 
 /// Calcula 10^exp para exp>=0 con saturación.
@@ -654,8 +776,6 @@ bool_t rfRunFrequencyAnalyzer(void) {
 }
 
 bool_t rfReplayCaptured(void) {
-  bool_t level;
-
   if (!rfCaptureValid || rfPulseCount == 0) {
 #ifdef MEDIUM_DEBUG
     printf("[modules] [rf] ERROR: no hay captura valida para reproducir\r\n");
@@ -669,22 +789,35 @@ bool_t rfReplayCaptured(void) {
 
   cc1101_enterIdle();
   gpioInit(CC1101_GDO0_PIN, GPIO_OUTPUT);
-  level = rfFirstLevel;
-  gpioWrite(CC1101_GDO0_PIN, level);
+  gpioWrite(CC1101_GDO0_PIN, rfFirstLevel);
 
   if (!cc1101_enterTx()) {
     gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
     return FALSE;
   }
-
-  __disable_irq();
-  for (uint16_t i = 0; i < rfPulseCount; i++) {
-    delayInaccurateUs(rfPulseUs[i]);
-    level = !level;
-    gpioWrite(CC1101_GDO0_PIN, level);
+  if (!cc1101_waitState(CC1101_STATE_TX, 5000UL)) {
+    cc1101_enterIdle();
+    gpioWrite(CC1101_GDO0_PIN, FALSE);
+    gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
+    cc1101_enterRx();
+    return FALSE;
   }
-  delayInaccurateUs(2000);
-  __enable_irq();
+
+  for (uint16_t i = 0; i < rfPulseCount; i++) {
+    rfReplayDurUs[i] = rfPulseUs[i];
+  }
+
+  for (uint8_t rep = 0U; rep < RF_REPLAY_REPEAT_COUNT; rep++) {
+    if (!rfReplayTimedUs(rfReplayDurUs, rfPulseCount, rfFirstLevel)) {
+      cc1101_enterIdle();
+      gpioWrite(CC1101_GDO0_PIN, FALSE);
+      gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
+      cc1101_enterRx();
+      return FALSE;
+    }
+    gpioWrite(CC1101_GDO0_PIN, FALSE);
+    delayInaccurateUs(RF_REPLAY_GUARD_US);
+  }
 
   cc1101_enterIdle();
   gpioWrite(CC1101_GDO0_PIN, FALSE);
@@ -699,9 +832,7 @@ bool_t rfReplayCaptured(void) {
 
 bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
                      uint8_t startLevel, int8_t tickScale) {
-  bool_t level = startLevel ? TRUE : FALSE;
-  uint32_t totalUs = 0U;
-  bool_t ok = TRUE;
+  bool_t start = startLevel ? TRUE : FALSE;
 
   if (edges == NULL || edgeCount == 0U || edgeCount > RF_CAPTURE_PULSES_MAX) {
     return FALSE;
@@ -713,45 +844,43 @@ bool_t rfReplayEdges(const uint32_t *edges, uint32_t edgeCount,
 
   cc1101_enterIdle();
   gpioInit(CC1101_GDO0_PIN, GPIO_OUTPUT);
-  gpioWrite(CC1101_GDO0_PIN, level);
+  gpioWrite(CC1101_GDO0_PIN, start);
 
   if (!cc1101_enterTx()) {
     gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
     return FALSE;
   }
+  if (!cc1101_waitState(CC1101_STATE_TX, 5000UL)) {
+    cc1101_enterIdle();
+    gpioWrite(CC1101_GDO0_PIN, FALSE);
+    gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
+    cc1101_enterRx();
+    return FALSE;
+  }
 
-  __disable_irq();
   for (uint32_t i = 0; i < edgeCount; i++) {
     uint32_t durationUs = rfTicksToUs(edges[i], tickScale);
     if (durationUs == 0U) {
       durationUs = 1U;
     }
-    if (durationUs > RF_REPLAY_MAX_EDGE_US) {
-      ok = FALSE;
-      break;
-    }
-    if (totalUs > (RF_REPLAY_MAX_TOTAL_US - durationUs)) {
-      ok = FALSE;
-      break;
-    }
-    totalUs += durationUs;
-    delayInaccurateUs(durationUs);
-    level = !level;
-    gpioWrite(CC1101_GDO0_PIN, level);
+    rfReplayDurUs[i] = durationUs;
   }
 
-  if (ok) {
-    delayInaccurateUs(2000);
+  for (uint8_t rep = 0U; rep < RF_REPLAY_REPEAT_COUNT; rep++) {
+    if (!rfReplayTimedUs(rfReplayDurUs, edgeCount, start)) {
+      cc1101_enterIdle();
+      gpioWrite(CC1101_GDO0_PIN, FALSE);
+      gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
+      cc1101_enterRx();
+      return FALSE;
+    }
+      gpioWrite(CC1101_GDO0_PIN, FALSE);
+      delayInaccurateUs(RF_REPLAY_GUARD_US);
   }
-  __enable_irq();
   cc1101_enterIdle();
   gpioWrite(CC1101_GDO0_PIN, FALSE);
   gpioInit(CC1101_GDO0_PIN, GPIO_INPUT);
   cc1101_enterRx();
-
-  if (!ok) {
-    return FALSE;
-  }
 
 #ifdef MEDIUM_DEBUG
   printf("[modules] [rf] Replay desde .sig OK (%lu edges)\r\n",
