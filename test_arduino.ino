@@ -1,50 +1,105 @@
 #include <IRremote.hpp>
 
 #define IR_RECEIVE_PIN 2
-#define IR_SEND_PIN    3
-#define BUTTON_PIN     4
 
-// NEC a emitir (configurable)
-#define NEC_ADDRESS 0xFF
-#define NEC_COMMAND 0x00
+// Pines de LEDs
+const uint8_t ledPins[] = {3, 4, 5, 6};
+const uint8_t LED_COUNT = 4;
 
-void printBinary64(uint64_t value, uint8_t bits) {
-  Serial.print("0b");
-  for (int i = bits - 1; i >= 0; i--) {
-    Serial.print(((value >> i) & 1) ? '1' : '0');
+// Estados posibles
+enum LedMode {
+  ALL_ON,
+  BLINK_ALL,
+  SEQ_UP,
+  SEQ_DOWN,
+  IDLE
+};
+
+LedMode currentMode = IDLE;
+
+// Variables de temporización
+unsigned long lastMillis = 0;
+uint8_t ledIndex = 0;
+bool blinkState = false;
+
+// ---------------- FUNCIONES AUXILIARES ----------------
+
+void allLedsOff() {
+  for (uint8_t i = 0; i < LED_COUNT; i++) {
+    digitalWrite(ledPins[i], LOW);
   }
 }
 
-void printRawBuffer() {
-  Serial.println("RAW buffer (mark/space en us):");
-
-  for (uint16_t i = 1; i < IrReceiver.irparams.rawlen; i++) {
-    uint32_t duration = IrReceiver.irparams.rawbuf[i] * MICROS_PER_TICK;
-
-    if (i & 1) {
-      Serial.print("MARK  ");
-    } else {
-      Serial.print("SPACE ");
-    }
-
-    Serial.println(duration);
+void allLedsOn() {
+  for (uint8_t i = 0; i < LED_COUNT; i++) {
+    digitalWrite(ledPins[i], HIGH);
   }
 }
+
+void handleLedModes() {
+  unsigned long now = millis();
+
+  switch (currentMode) {
+
+    case ALL_ON:
+      allLedsOn();
+      break;
+
+    case BLINK_ALL:
+      if (now - lastMillis >= 200) {
+        lastMillis = now;
+        blinkState = !blinkState;
+        for (uint8_t i = 0; i < LED_COUNT; i++) {
+          digitalWrite(ledPins[i], blinkState);
+        }
+      }
+      break;
+
+    case SEQ_UP:
+      if (now - lastMillis >= 200) {
+        lastMillis = now;
+        allLedsOff();
+        digitalWrite(ledPins[ledIndex], HIGH);
+        ledIndex = (ledIndex + 1) % LED_COUNT;
+      }
+      break;
+
+    case SEQ_DOWN:
+      if (now - lastMillis >= 200) {
+        lastMillis = now;
+        allLedsOff();
+        digitalWrite(ledPins[LED_COUNT - 1 - ledIndex], HIGH);
+        ledIndex = (ledIndex + 1) % LED_COUNT;
+      }
+      break;
+
+    default:
+      break;
+  }
+}
+
+// ---------------- SETUP ----------------
 
 void setup() {
   Serial.begin(115200);
   delay(200);
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  for (uint8_t i = 0; i < LED_COUNT; i++) {
+    pinMode(ledPins[i], OUTPUT);
+    digitalWrite(ledPins[i], LOW);
+  }
+
   IrReceiver.begin(IR_RECEIVE_PIN, ENABLE_LED_FEEDBACK);
-  IrSender.begin(IR_SEND_PIN);
 
-
-  Serial.println("IR ANALYZER UNIVERSAL (AVR)");
-  Serial.println("---------------------------");
+  Serial.println("IR ANALYZER + LED CONTROLLER");
+  Serial.println("--------------------------------");
 }
 
+// ---------------- LOOP ----------------
+
 void loop() {
+
+  handleLedModes();
 
   if (IrReceiver.decode()) {
 
@@ -53,54 +108,47 @@ void loop() {
     Serial.print("Protocol: ");
     Serial.println(getProtocolString(data.protocol));
 
-    Serial.print("Bits: ");
-    Serial.println(data.numberOfBits);
+    Serial.print("ADDR: 0x");
+    Serial.println(data.address, HEX);
 
-    if (data.protocol != UNKNOWN && data.numberOfBits > 0) {
-      Serial.print("Decoded RAW HEX: 0x");
-      Serial.println(data.decodedRawData, HEX);
+    Serial.print("CMND: 0x");
+    Serial.println(data.command, HEX);
 
-      Serial.print("Decoded RAW BIN: ");
-      printBinary64(data.decodedRawData, data.numberOfBits);
-      Serial.println();
-    } else {
-      Serial.println("UNKNOWN protocol -> RAW only");
+    if (data.protocol == NEC && data.address == 0x00) {
+
+      ledIndex = 0;        // reinicia secuencias
+      blinkState = false;
+      lastMillis = millis();
+
+      switch (data.command) {
+
+        case 0x16:
+          currentMode = ALL_ON;
+          Serial.println("Modo: ALL ON");
+          break;
+
+        case 0x0C:
+          currentMode = BLINK_ALL;
+          Serial.println("Modo: BLINK ALL");
+          break;
+
+        case 0x18:
+          currentMode = SEQ_UP;
+          Serial.println("Modo: SECUENCIA ASCENDENTE");
+          break;
+
+        case 0x5E:
+          currentMode = SEQ_DOWN;
+          Serial.println("Modo: SECUENCIA DESCENDENTE");
+          break;
+
+        default:
+          Serial.println("Comando NEC no asignado");
+          break;
+      }
     }
 
-    Serial.print("Raw length: ");
-    Serial.println(IrReceiver.irparams.rawlen);
-
-    printRawBuffer();
-
     Serial.println("================================");
-
     IrReceiver.resume();
   }
-  // ===== ENVÍO NEC POR BOTÓN =====
-  static bool lastButton = HIGH;
-  bool button = digitalRead(BUTTON_PIN);
-
-  if (lastButton == HIGH && button == LOW) {
-    Serial.println("BOTON PRESIONADO -> Enviando NEC");
-
-    IrSender.sendNEC(NEC_ADDRESS, NEC_COMMAND, 0);
-
-    Serial.print("TX Address: 0x");
-    Serial.print(NEC_ADDRESS, HEX);
-    Serial.print(" ");
-    printBinary64(NEC_ADDRESS,16);
-    Serial.println();
-
-    Serial.print("TX Command: 0x");
-    Serial.print(NEC_COMMAND, HEX);
-    Serial.print(" ");
-    printBinary64(NEC_COMMAND,16);
-    Serial.println();
-
-    Serial.println("-----");
-
-    delay(300); // debounce simple
-  }
-
-  lastButton = button;
 }
