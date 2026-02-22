@@ -42,6 +42,10 @@
 
 /*==================[macros and definitions]=================================*/
 
+// Debug Exception and Monitor Control Register (DEMCR).
+#define SAPI_DEMCR_REG    (HW_REG_32_RW(0xE000EDFC))
+#define SAPI_DEMCR_TRCENA (1UL << 24)
+
 /*==================[internal data declaration]==============================*/
 
 /** Registros correspondientes al nucleo. Probados con Cortex-M3 y Cortex-M4. */
@@ -72,6 +76,10 @@ bool_t cyclesCounterInit( uint32_t clockSpeed )
 {
    //Asigna  a la variable local ClockSpeed el valor recibido como argumento.
    ClockSpeed = clockSpeed;
+   // Habilita el bloque de trazas para que DWT_CYCCNT funcione sin debugger.
+   SAPI_DEMCR_REG |= SAPI_DEMCR_TRCENA;
+   // Reinicia contador para evitar estado previo indefinido.
+   DWT_CYCCNT = 0;
    //Iniciar el contador de ciclos de clock.
    DWT_CTRL  |= 1; // *DWT_CTRL  |= 1;
    return TRUE;

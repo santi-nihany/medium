@@ -48,11 +48,7 @@ uv run signals.py --help    # analiza un archivo .sig
 Se utilizó la última versión del [firmware_v3](https://github.com/epernia/firmware_v3/tree/548bcbf756a6260e241ef0d6820f4e2b3c81f765) para la CIAA en el momento de iniciar el proyecto (hash 548bcbf, publicada el 8 de abril de 2025). Sobre la misma se aplicarion los siguientes parches:
 
 - <details>
-  <summary>
-
-  `libs/lpc_fatfs_disks/sapi/src/sapi_sdcard.c`
-  
-  </summary>
+  <summary><a href="libs/lpc_fatfs_disks/sapi/src/sapi_sdcard.c">libs/lpc_fatfs_disks/sapi/src/sapi_sdcard.c</a></summary>
   
   ```diff c
   case FSSDC_CardStatus_Ready:
@@ -69,11 +65,7 @@ Se utilizó la última versión del [firmware_v3](https://github.com/epernia/fir
 
   </details>
 - <details>
-  <summary>
-
-  `libs/lpc_fatfs_disks/source/fssdc.c`
-  
-  </summary>
+  <summary><a href="libs/lpc_fatfs_disks/source/fssdc.c">libs/lpc_fatfs_disks/source/fssdc.c</a></summary>
   
   ```diff c
   #ifndef FSSDC_SUPPORTS_HOT_INSERTION
@@ -85,6 +77,33 @@ Se utilizó la última versión del [firmware_v3](https://github.com/epernia/fir
       newCardStatus (FSSDC_CardStatus_Inserted);
       FSSDC_FatFs_DiskInitialize ();
   #endif
+  ```
+
+  </details>
+- <details>
+  <summary><a href="libs/sapi/sapi_v0.6.2/soc/core/src/sapi_cyclesCounter.c">libs/sapi/sapi_v0.6.2/soc/core/src/sapi_cyclesCounter.c</a></summary>
+  
+  ```diff c
+  /*==================[macros and definitions]=================================*/
+  +
+  + // Debug Exception and Monitor Control Register (DEMCR).
+  + #define SAPI_DEMCR_REG    (HW_REG_32_RW(0xE000EDFC))
+  + #define SAPI_DEMCR_TRCENA (1UL << 24)
+  ```
+
+  ```diff c
+  bool_t cyclesCounterInit( uint32_t clockSpeed )
+  {
+     //Asigna  a la variable local ClockSpeed el valor recibido como argumento.
+     ClockSpeed = clockSpeed;
+  +  // Habilita el bloque de trazas para que DWT_CYCCNT funcione sin debugger.
+  +  SAPI_DEMCR_REG |= SAPI_DEMCR_TRCENA;
+  +  // Reinicia contador para evitar estado previo indefinido.
+  +  DWT_CYCCNT = 0;
+     //Iniciar el contador de ciclos de clock.
+     DWT_CTRL  |= 1; // *DWT_CTRL  |= 1;
+     return TRUE;
+  }
   ```
 
   </details>
