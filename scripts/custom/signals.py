@@ -296,6 +296,142 @@ def metadata_lines(record: SigRecord) -> list[str]:
     return lines
 
 
+@dataclass
+class DecodedBit:
+    bit: int  # 0 or 1
+    t_start: float  # start time in scaled ticks
+    t_end: float  # end time in scaled ticks
+
+
+def decode_bits_princeton(record: SigRecord) -> list[DecodedBit]:
+    """Decode Princeton-encoded bits from edges.
+
+    Each bit is two edges (mark high + space low):
+      0 = short mark (~Te) + long space (~2-3*Te)
+      1 = long mark (~2-3*Te) + short space (~Te)
+    The signal starts low, has noise/gap, then a long preamble mark,
+    a sync space, and then data bit pairs.
+    """
+    factor = tick_scale_factor(record.tick_scale)
+    edges = record.edges
+    if len(edges) < 6:
+        return []
+
+    # Find preamble: the longest high pulse (start_level=0 means odd
+    # indices are high durations).
+    start_level = 1 if (record.flags & SIG_FLAG_START_LEVEL) else 0
+    preamble_idx = -1
+    preamble_val = 0
+    for i in range(len(edges)):
+        level_during = (start_level + i) % 2  # level during this edge
+        if level_during == 1 and edges[i] > preamble_val:
+            preamble_val = edges[i]
+            preamble_idx = i
+
+    if preamble_idx < 0 or preamble_idx + 2 >= len(edges):
+        return []
+
+    # After preamble mark: skip the sync space, then read (mark, space) pairs
+    data_start = preamble_idx + 2  # skip preamble mark + sync space
+
+    # Collect all data edge durations (raw ticks) to find threshold
+    data_raw = edges[data_start:]
+    if len(data_raw) < 2:
+        return []
+    short_val = min(data_raw)
+    long_val = max(e for e in data_raw if e < preamble_val // 2)
+    threshold = (short_val + long_val) / 2.0
+
+    # Accumulate scaled time up to data_start
+    t = sum(edges[j] * factor for j in range(data_start))
+
+    bits: list[DecodedBit] = []
+    i = data_start
+    while i + 1 < len(edges):
+        mark_raw = edges[i]
+        space_raw = edges[i + 1]
+
+        # Guard/preamble detection: either pulse much larger than data
+        if mark_raw > preamble_val // 2 or space_raw > preamble_val // 2:
+            break
+
+        t_start = t
+        t += (mark_raw + space_raw) * factor
+        t_end = t
+
+        if mark_raw < threshold and space_raw >= threshold:
+            bits.append(DecodedBit(0, t_start, t_end))
+        elif mark_raw >= threshold and space_raw < threshold:
+            bits.append(DecodedBit(1, t_start, t_end))
+
+        i += 2
+
+    return bits
+
+
+def decode_bits_nec(record: SigRecord) -> list[DecodedBit]:
+    """Decode NEC-encoded bits from edges.
+
+    Leader: ~9000 µs mark + ~4500 µs space (raw ticks are in µs).
+    Each bit: ~560 µs mark + space (~560 µs = 0, ~1690 µs = 1).
+    Stop: ~560 µs mark.
+    """
+    factor = tick_scale_factor(record.tick_scale)
+    edges = record.edges
+    if len(edges) < 4:
+        return []
+
+    # Find leader: first pulse > 5000 raw ticks (the 9000 µs mark)
+    leader_idx = -1
+    for i in range(len(edges)):
+        if edges[i] > 5000:
+            leader_idx = i
+            break
+
+    if leader_idx < 0 or leader_idx + 3 >= len(edges):
+        return []
+
+    # Data starts after leader mark + leader space
+    data_start = leader_idx + 2
+    t = sum(edges[j] * factor for j in range(data_start))
+
+    threshold_raw = (560.0 + 1690.0) / 2.0  # ~1125 µs in raw ticks
+
+    bits: list[DecodedBit] = []
+    i = data_start
+    while i + 1 < len(edges):
+        mark_raw = edges[i]
+        space_raw = edges[i + 1]
+
+        # Verify mark is roughly 560 µs (raw ticks)
+        if abs(mark_raw - 560) > 300:
+            break
+
+        t_start = t
+        t += (mark_raw + space_raw) * factor
+        t_end = t
+
+        if space_raw < threshold_raw:
+            bits.append(DecodedBit(0, t_start, t_end))
+        else:
+            bits.append(DecodedBit(1, t_start, t_end))
+
+        if len(bits) >= 32:
+            break
+
+        i += 2
+
+    return bits
+
+
+def decode_bits(record: SigRecord) -> list[DecodedBit]:
+    if record.signal_type == SIG_SIGNAL_TYPE_RF:
+        return decode_bits_princeton(record)
+    if record.signal_type == SIG_SIGNAL_TYPE_IR:
+        return decode_bits_nec(record)
+    return []
+
+
 def plot_record(record: SigRecord, title: str, output: Path | None) -> None:
     times, levels = build_waveform(record)
     lines = metadata_lines(record)
@@ -306,12 +442,28 @@ def plot_record(record: SigRecord, title: str, output: Path | None) -> None:
     ax_meta = fig.add_subplot(gs[0, 1])
 
     ax_signal.step(times, levels, where="post", linewidth=1.4)
-    ax_signal.set_ylim(-0.2, 1.2)
+    ax_signal.set_ylim(-0.2, 1.5)
     ax_signal.set_yticks([0, 1])
     ax_signal.set_ylabel("Level")
     ax_signal.set_xlabel("Time (scaled ticks)")
     ax_signal.set_title("Signal waveform")
-    ax_signal.grid(True, alpha=0.3)
+    ax_signal.grid(False)
+
+    decoded = decode_bits(record)
+    for db in decoded:
+        color = "#D0D0D0" if db.bit == 1 else "#FFFFFF"
+        ax_signal.axvspan(db.t_start, db.t_end, color=color, alpha=0.5)
+        t_mid = (db.t_start + db.t_end) / 2.0
+        ax_signal.text(
+            t_mid,
+            1.25,
+            str(db.bit),
+            ha="center",
+            va="center",
+            fontsize=7,
+            color="red",
+            fontweight="bold",
+        )
 
     ax_meta.axis("off")
     ax_meta.text(
