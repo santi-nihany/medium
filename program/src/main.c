@@ -32,6 +32,7 @@ int main(void) {
 #endif
 
   // Inicializar componentes
+  delayInaccurateMs(250); // Esperar a estabilización
   buttonsInit();
   displayInit();
   storageInit();

@@ -239,7 +239,8 @@ static sigRfModulation_t uiRfPresetToSigModulation(cc1101ModPreset_t preset) {
 }
 
 /// Convierte enum de metadata .sig a preset de CC1101.
-static cc1101ModPreset_t uiSigModulationToRfPreset(sigRfModulation_t modulation) {
+static cc1101ModPreset_t
+uiSigModulationToRfPreset(sigRfModulation_t modulation) {
   if (modulation == SIG_RF_MOD_AM270) {
     return CC1101_OOK_PRESET_AM270_ASYNC;
   }
@@ -327,8 +328,8 @@ static bool_t uiSelectRfRecordConfig(cc1101OokConfig_t *configOut) {
           uiRfSelectedMod =
               (uiRfModOption_t)((((uint8_t)uiRfSelectedMod) + 1U) % 2U);
         } else {
-          uiRfSelectedMod = (uiRfModOption_t)(
-              (((uint8_t)uiRfSelectedMod) + 2U - 1U) % 2U);
+          uiRfSelectedMod =
+              (uiRfModOption_t)((((uint8_t)uiRfSelectedMod) + 2U - 1U) % 2U);
         }
       }
       uiDrawRfRecordConfig(uiRfSelectedFreq, uiRfSelectedMod, selectedRow);
@@ -393,9 +394,9 @@ static bool_t uiRfConfigFromMetadata(const uint8_t *metadata,
     return FALSE;
   }
 
-  *configOut = uiRfConfigFromSelection(uiRfFrequencyToOption(frequencyHz),
-                                       uiRfPresetToOption(
-                                           uiSigModulationToRfPreset(modulation)));
+  *configOut = uiRfConfigFromSelection(
+      uiRfFrequencyToOption(frequencyHz),
+      uiRfPresetToOption(uiSigModulationToRfPreset(modulation)));
   return TRUE;
 }
 
@@ -644,9 +645,11 @@ static bool_t uiSaveLastRfCaptureToSig(const char *path) {
       printf("[tasks  ] [ui] RF guardada en %s (%u edges, %luHz, %s)\r\n", path,
              pulseCount, (unsigned long)captureConfig.frequencyHz, modName);
       if (hasPrinceton) {
-        printf("[tasks  ] [ui] Metadata Princeton key=0x%06lX te=%uus gt=%u bits=%u\r\n",
+        printf("[tasks  ] [ui] Metadata Princeton key=0x%06lX te=%uus gt=%u "
+               "bits=%u\r\n",
                (unsigned long)princetonInfo.key, (unsigned)princetonInfo.teUs,
-               (unsigned)princetonInfo.guardTime, (unsigned)princetonInfo.bitCount);
+               (unsigned)princetonInfo.guardTime,
+               (unsigned)princetonInfo.bitCount);
       }
     }
 #endif
