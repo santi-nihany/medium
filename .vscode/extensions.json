@@ -1,3 +1,7 @@
 {
-  "recommendations": ["marus25.cortex-debug", "ms-vscode.cpptools"]
+  "recommendations": [
+    "marus25.cortex-debug",
+    "ms-vscode.cpptools",
+    "myriad-dreamin.tinymist"
+  ]
 }

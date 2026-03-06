@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "joystick_sparkfun")(type "KiCad")(uri "${KIPRJMOD}/libraries/symbols/joystick_sparkfun.kicad_sym")(options "")(descr ""))
+)

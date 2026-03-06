@@ -4,6 +4,11 @@
 
 Dispositivo para leer y emitir señales infrarrojas y de radiofrecuencia. Basado en la [EDU-CIAA-NXP](https://www.proyecto-ciaa.com.ar/devwiki/doku.php%3Fid=desarrollo:edu-ciaa:edu-ciaa-nxp.html), que cuenta con un procesador LPC4337.
 
+## Documentación
+
+- [Informe final](docs/medium/informe/informe.pdf) (incluye manual de usuario).
+- [Proyecto de KiCad del poncho](docs/medium/poncho).
+
 ## Desarrollo
 
 Para instalar
